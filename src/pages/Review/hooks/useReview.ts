@@ -257,7 +257,6 @@ export function useReview(): UseReviewReturn {
         currentCard.id,
         user.id,
         true, // was successful
-        true, // counts toward progress
         undefined // review time - could be calculated
       );
 
@@ -298,7 +297,6 @@ export function useReview(): UseReviewReturn {
         currentCard.id,
         user.id,
         false, // was not successful
-        false,  // does not count toward progress
         undefined // review time - could be calculated
       );
 

@@ -269,7 +269,6 @@ export const dataService = {
     verseCardId: number, 
     userId: string, 
     wasSuccessful: boolean, 
-    countedTowardProgress: boolean = true,
     reviewTimeSeconds?: number
   ): Promise<DualWriteResult<LocalDBSchema['review_logs']>> {
     const result: DualWriteResult<LocalDBSchema['review_logs']> = {
@@ -281,69 +280,35 @@ export const dataService = {
 
     try {
       // Step 1: Save review log locally first (fast operation)
+      // Note: counted_toward_progress will be determined by database trigger
       const localLog = await localDb.reviewLogs.create({
         user_id: userId,
         verse_card_id: verseCardId,
         was_successful: wasSuccessful,
-        counted_toward_progress: countedTowardProgress,
+        counted_toward_progress: false, // Will be updated by trigger if applicable
         review_time_seconds: reviewTimeSeconds || null
       });
 
       result.local = localLog;
 
-      // Step 2: Update verse card progress using spaced repetition algorithm
-      const verseCard = await localDb.verseCards.get(verseCardId);
-      if (!verseCard) {
-        throw new Error('Verse card not found');
-      }
-
-      // Process the review using the spaced repetition algorithm
-      const reviewResult = processReview(
-        verseCard.current_phase as ReviewPhase,
-        verseCard.phase_progress_count,
-        wasSuccessful, 
-        countedTowardProgress
-      );
-      
-      // Update streaks based on success/failure
-      const streakUpdates = wasSuccessful ? {
-        current_streak: verseCard.current_streak + 1,
-        best_streak: Math.max(verseCard.best_streak, verseCard.current_streak + 1)
-      } : {
-        current_streak: 0
-      };
-
-      // Apply all updates to the verse card
-      await db.verse_cards.update(verseCardId, {
-        current_phase: reviewResult.current_phase,
-        phase_progress_count: reviewResult.phase_progress_count,
-        next_due_date: reviewResult.next_due_date,
-        ...streakUpdates,
-        last_reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-
-      console.log('Spaced repetition update:', {
-        verseId: verseCardId,
+      // Step 2: Database trigger will handle all verse card updates automatically
+      // including: phase progression, due dates, streaks, timestamps, etc.
+      console.log('Review recorded:', {
+        verseCardId,
         wasSuccessful,
-        oldPhase: verseCard.current_phase,
-        newPhase: reviewResult.current_phase,
-        oldProgress: verseCard.phase_progress_count,
-        newProgress: reviewResult.phase_progress_count,
-        nextDueDate: reviewResult.next_due_date
+        reviewTime: reviewTimeSeconds
       });
 
       // Step 3: Sync to remote (graceful degradation on failure)
       try {
-        // For now, we'll skip remote sync for review logs since the trigger issue needs to be resolved
-        console.warn('Review log remote sync disabled - data saved locally only');
+        // TODO: Implement remote sync with proper ID mapping
+        // Database trigger will handle all verse_card updates automatically
+        console.warn('Review log remote sync not yet implemented - data saved locally only');
         
-        // TODO: Implement remote sync once database triggers are fixed
         // const remoteLog = await supabaseDb.reviewLogs.create({
         //   user_id: userId,
         //   verse_card_id: remoteVerseCardId, // Would need to map local ID to remote ID
         //   was_successful: wasSuccessful,
-        //   counted_toward_progress: countedTowardProgress,
         //   review_time_seconds: reviewTimeSeconds
         // });
         
