@@ -32,10 +32,12 @@ review_logs (id, user_id, verse_card_id, was_successful, etc.)
 ### Core User Flow
 1. User enters a Bible reference (e.g., "John 3:16", "Romans 8:28-30")
 2. System validates the reference format using existing parser
+  2.a. if system cant validate, go ahead with esv api SKIP 3 and 4., it has good parsing. keep track of if it failed for step 5.
 3. System checks if verse already exists in verses table
 4. **If verse exists**: Create verse_card with existing verse_id
 5. **If verse doesn't exist**: 
    - Fetch verse text from ESV API
+   - if step 2 failed, now check if this verse already exists in verses table. It should not create a new entry if reference is the same. 
    - Save new verse to verses table
    - Create verse_card with new verse_id
 6. Database triggers automatically create review_logs entry
