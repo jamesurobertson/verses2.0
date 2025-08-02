@@ -1,9 +1,6 @@
 -- Bible Memory App - Complete Database Schema
 -- This migration creates the complete database schema in one file
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- Drop existing tables and functions if they exist
 DROP TABLE IF EXISTS review_logs CASCADE;
 DROP TABLE IF EXISTS verse_cards CASCADE;
@@ -17,7 +14,7 @@ DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 
 -- Verses Table
 CREATE TABLE public.verses (
-    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     reference text NOT NULL,
     text text NOT NULL,
     translation text NOT NULL DEFAULT 'ESV',
@@ -31,7 +28,7 @@ ALTER TABLE public.verses ENABLE ROW LEVEL SECURITY;
 
 -- Verse Cards Table
 CREATE TABLE public.verse_cards (
-    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     verse_id uuid NOT NULL REFERENCES public.verses(id) ON DELETE CASCADE,
     current_phase text NOT NULL DEFAULT 'daily' 
@@ -42,7 +39,7 @@ CREATE TABLE public.verse_cards (
     archived boolean NOT NULL DEFAULT false,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
-    current_streak integer DEFAULT 0,
+    current_streak NOT NULL integer DEFAULT 0,
     best_streak integer DEFAULT 0
 );
 
@@ -51,7 +48,7 @@ ALTER TABLE public.verse_cards ENABLE ROW LEVEL SECURITY;
 
 -- Review Logs Table
 CREATE TABLE public.review_logs (
-    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     verse_card_id uuid NOT NULL REFERENCES public.verse_cards(id) ON DELETE CASCADE,
     was_successful boolean NOT NULL,
@@ -65,7 +62,7 @@ ALTER TABLE public.review_logs ENABLE ROW LEVEL SECURITY;
 
 -- User Profiles Table
 CREATE TABLE public.user_profiles (
-    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     email text,
     full_name text,
@@ -226,3 +223,22 @@ CREATE TRIGGER verse_card_review_log_trigger
 AFTER INSERT ON verse_cards
 FOR EACH ROW
 EXECUTE FUNCTION create_review_log_for_verse_card();
+
+-- Add aliases column to verses table for efficient reference lookup
+-- This allows multiple ways to reference the same verse (jn 1:1, john 1:1, etc.)
+
+-- Add the aliases column as TEXT array
+ALTER TABLE public.verses 
+ADD COLUMN aliases TEXT[] DEFAULT '{}';
+
+-- Create GIN index for fast alias lookups
+CREATE INDEX idx_verses_aliases ON public.verses USING GIN (aliases);
+
+-- Update existing verses to include their canonical reference as first alias
+-- This ensures backwards compatibility
+UPDATE public.verses 
+SET aliases = ARRAY[LOWER(TRIM(reference))]
+WHERE aliases = '{}';
+
+-- Add comment for documentation
+COMMENT ON COLUMN public.verses.aliases IS 'Array of normalized reference formats that point to this verse (e.g. ["jn 1:1", "john 1:1"])';

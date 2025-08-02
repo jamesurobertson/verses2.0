@@ -182,7 +182,7 @@ export function useReview(): UseReviewReturn {
         loadDueCards(user.id),
         loadTodaysCards(user.id)
       ]);
-      
+
       setDueCards(dueCardsData);
       setTodaysCards(todaysCardsData);
     } catch (err) {
@@ -231,7 +231,7 @@ export function useReview(): UseReviewReturn {
    */
   const startIncorrectReview = useCallback(() => {
     if (!session || session.incorrectCards.length === 0) return;
-    
+
     setSession({
       cards: [...session.incorrectCards], // Review only the incorrect cards
       currentIndex: 0,
@@ -298,7 +298,7 @@ export function useReview(): UseReviewReturn {
         currentCard.id,
         user.id,
         false, // was not successful
-        true,  // still counts toward progress
+        false,  // does not count toward progress
         undefined // review time - could be calculated
       );
 
@@ -338,7 +338,7 @@ export function useReview(): UseReviewReturn {
         sessionDuration: Math.round(sessionDuration)
       });
     }
-    
+
     setSession(null);
   }, [session]);
 

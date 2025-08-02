@@ -7,6 +7,7 @@ import { AddVerse } from '../pages/AddVerse/AddVerse';
 import { Settings } from '../pages/Settings/Settings';
 import { Auth } from '../pages/Auth/Auth';
 import { NotFound } from '../pages/NotFound/NotFound';
+import Spinner from '../components/Spinner/Spinner';
 
 /**
  * Mobile-first application router with protected routes.
@@ -17,14 +18,7 @@ export function AppRouter() {
 
   // Show loading spinner while checking authentication
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
+    return <Spinner />
   }
 
   // If user is not authenticated, show auth page
@@ -44,13 +38,13 @@ export function AppRouter() {
         <Routes>
           {/* Default route redirects to review */}
           <Route path="/" element={<Navigate to="/review" replace />} />
-          
+
           {/* Main app routes */}
           <Route path="/review" element={<Review />} />
           <Route path="/library" element={<Library />} />
           <Route path="/add" element={<AddVerse />} />
           <Route path="/settings" element={<Settings />} />
-          
+
           {/* 404 page */}
           <Route path="*" element={<NotFound />} />
         </Routes>

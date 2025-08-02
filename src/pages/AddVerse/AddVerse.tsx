@@ -26,7 +26,7 @@ export function AddVerse() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!reference.trim()) {
       return;
     }
@@ -76,15 +76,6 @@ export function AddVerse() {
       <div className="sticky top-0 z-10 bg-white">
         <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
           <div className="flex items-center mb-4">
-            <button 
-              onClick={() => navigate(-1)}
-              className="mr-3 p-2 text-primary hover:text-accent transition-colors"
-              aria-label="Go back"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
             <h1 className="text-3xl font-bold text-primary">Add Verse</h1>
           </div>
         </div>
@@ -140,7 +131,7 @@ export function AddVerse() {
               type="submit"
               disabled={isLoading || !reference.trim() || !!validationError}
               onClick={handleSubmit}
-              className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed text-white font-medium py-4 px-6 rounded-lg text-base transition-colors shadow-sm"
+              className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed font-medium py-4 px-6 rounded-lg text-base transition-colors shadow-sm"
             >
               {isLoading ? 'Adding Verse...' : 'Add Verse'}
             </button>

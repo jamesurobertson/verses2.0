@@ -40,7 +40,7 @@ verse_cards (
   archived boolean DEFAULT false,
   created_at timestamp,
   updated_at timestamp,
-  current_streak integer DEFAULT 0,
+  current_streak NOT NULL integer DEFAULT 0,
   best_streak integer DEFAULT 0
 )
 

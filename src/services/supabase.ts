@@ -146,8 +146,6 @@ export function createSupabaseClient(): TypedSupabaseClient {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  console.log('Supabase config:', { supabaseUrl, supabaseKey: supabaseKey ? 'Present' : 'Missing' });
-
   if (!supabaseUrl || !supabaseKey) {
     throw new Error('Missing Supabase environment variables');
   }
@@ -170,8 +168,6 @@ export function createSupabaseClient(): TypedSupabaseClient {
 
 // Export singleton client instance
 export const supabaseClient = createSupabaseClient();
-console.log({ supabaseClient })
-
 // Helper types for common operations
 export type UserProfile = {
   id: string;
@@ -210,15 +206,15 @@ export const db = {
   verses: {
     async getByReference(reference: string, translation: string = 'ESV') {
       console.log('Supabase getByReference:', { reference, translation });
-      
+
       // Check auth status
       const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session:', { 
-        hasSession: !!session, 
-        sessionError, 
-        userId: session?.user?.id 
+      console.log('Auth session:', {
+        hasSession: !!session,
+        sessionError,
+        userId: session?.user?.id
       });
-      
+
       const result = await supabaseClient
         .from('verses')
         .select('*')
@@ -239,15 +235,15 @@ export const db = {
 
     async create(verse: Database['public']['Tables']['verses']['Insert']) {
       console.log('Supabase create verse:', verse);
-      
+
       // Check auth status
       const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session for create:', { 
-        hasSession: !!session, 
-        sessionError, 
-        userId: session?.user?.id 
+      console.log('Auth session for create:', {
+        hasSession: !!session,
+        sessionError,
+        userId: session?.user?.id
       });
-      
+
       const result = await supabaseClient
         .from('verses')
         .insert(verse)
@@ -315,15 +311,15 @@ export const db = {
 
     async create(card: Database['public']['Tables']['verse_cards']['Insert']) {
       console.log('Supabase create verse card:', card);
-      
+
       // Check auth status
       const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session for card create:', { 
-        hasSession: !!session, 
-        sessionError, 
-        userId: session?.user?.id 
+      console.log('Auth session for card create:', {
+        hasSession: !!session,
+        sessionError,
+        userId: session?.user?.id
       });
-      
+
       const result = await supabaseClient
         .from('verse_cards')
         .insert(card)
