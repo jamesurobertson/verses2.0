@@ -34,10 +34,6 @@ export function AddVerse() {
     await addVerse(reference);
   };
 
-  const handleBack = () => {
-    navigate(-1);
-  };
-
   const handleAddAnother = () => {
     clearSuccess();
   };
@@ -50,106 +46,105 @@ export function AddVerse() {
     navigate('/review');
   };
 
+  // Handle removing a verse (archive it)
+  const handleRemoveVerse = async (verseCardId: number) => {
+    // TODO: Implement removeVerse in dataService or localDb
+    // For now, just log and refresh
+    console.log('Removing verse card:', verseCardId);
+    // This would archive the verse card
+    // await dataService.archiveVerseCard(verseCardId);
+  };
+
   // Show success message if verse was added successfully
   if (success) {
     return (
-      <div className="bg-background flex flex-col font-roboto">
-        {/* Header with back button */}
-        <div className="bg-background px-4 py-4 flex items-center">
-          <button 
-            onClick={handleBack}
-            className="mr-3 p-2 text-primary hover:text-accent transition-colors"
-            aria-label="Go back"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h1 className="text-xl font-medium text-primary">Add Verse</h1>
-        </div>
-
-        {/* Success content */}
-        <div className="flex-1 px-4 py-6">
-          <SuccessMessage
-            reference={success.reference}
-            text={success.text}
-            onAddAnother={handleAddAnother}
-            onGoToLibrary={handleGoToLibrary}
-            onStartReviewing={handleStartReviewing}
-          />
-        </div>
-      </div>
+      <SuccessMessage
+        reference={success.reference}
+        text={success.text}
+        verseCard={success.verseCard}
+        onAddAnother={handleAddAnother}
+        onGoToLibrary={handleGoToLibrary}
+        onStartReviewing={handleStartReviewing}
+        onRemoveVerse={handleRemoveVerse}
+      />
     );
   }
 
   return (
-    <div className="bg-background flex flex-col font-roboto">
-      {/* Header with back button */}
-      <div className="bg-background px-4 py-4 flex items-center">
-        <button 
-          onClick={handleBack}
-          className="mr-3 p-2 text-primary hover:text-accent transition-colors"
-          aria-label="Go back"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h1 className="text-xl font-medium text-primary">Add Verse</h1>
-      </div>
-
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col justify-between px-4 py-6">
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-full max-w-md">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Reference input */}
-              <div>
-                <label htmlFor="reference" className="block text-sm font-medium text-primary mb-3">
-                  Reference
-                </label>
-                <VerseReferenceInput
-                  value={reference}
-                  onChange={setReference}
-                  onValidation={validateReference}
-                  disabled={isLoading}
-                  isValidating={isValidating}
-                  validationError={validationError}
-                  placeholder="John 3:16"
-                  data-testid="verse-reference-input"
-                />
-              </div>
-
-              {/* Error display */}
-              {error && (
-                <div className="bg-error/10 border border-error/20 rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <p className="text-sm text-error font-medium">{error}</p>
-                    <button
-                      type="button"
-                      onClick={clearError}
-                      className="text-error hover:text-error/80 ml-2 text-lg leading-none font-bold"
-                      aria-label="Dismiss error"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              )}
-            </form>
+    <div className="bg-background">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-10 bg-white">
+        <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
+          <div className="flex items-center mb-4">
+            <button 
+              onClick={() => navigate(-1)}
+              className="mr-3 p-2 text-primary hover:text-accent transition-colors"
+              aria-label="Go back"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h1 className="text-3xl font-bold text-primary">Add Verse</h1>
           </div>
         </div>
+      </div>
 
-        {/* Bottom action button - positioned for thumb reach */}
-        <div className="w-full max-w-md mx-auto">
-          <button
-            type="submit"
-            disabled={isLoading || !reference.trim() || !!validationError}
-            onClick={handleSubmit}
-            className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed text-white font-medium py-4 px-6 rounded-lg text-base transition-colors shadow-sm"
-          >
-            {isLoading ? 'Adding Verse...' : 'Add Verse'}
-          </button>
+      {/* Scrollable Content */}
+      <div className="max-w-6xl mx-auto px-4 pt-6 pb-8 sm:px-6 lg:px-8">
+        {/* Main content area */}
+        <div className="flex flex-col justify-between min-h-[60vh]">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-md">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Reference input */}
+                <div>
+                  <label htmlFor="reference" className="block font-medium text-primary text-lg mb-3">
+                    Reference
+                  </label>
+                  <VerseReferenceInput
+                    value={reference}
+                    onChange={setReference}
+                    onValidation={validateReference}
+                    disabled={isLoading}
+                    isValidating={isValidating}
+                    validationError={validationError}
+                    placeholder="John 3:16"
+                    data-testid="verse-reference-input"
+                  />
+                </div>
+
+                {/* Error display */}
+                {error && (
+                  <div className="bg-error/10 border border-error/20 rounded-lg p-4">
+                    <div className="flex justify-between items-start">
+                      <p className="text-sm text-error font-medium">{error}</p>
+                      <button
+                        type="button"
+                        onClick={clearError}
+                        className="text-error hover:text-error/80 ml-2 text-lg leading-none font-bold"
+                        aria-label="Dismiss error"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </form>
+            </div>
+          </div>
+
+          {/* Bottom action button - positioned for thumb reach */}
+          <div className="w-full max-w-md mx-auto mt-8">
+            <button
+              type="submit"
+              disabled={isLoading || !reference.trim() || !!validationError}
+              onClick={handleSubmit}
+              className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed text-white font-medium py-4 px-6 rounded-lg text-base transition-colors shadow-sm"
+            >
+              {isLoading ? 'Adding Verse...' : 'Add Verse'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -128,62 +128,23 @@ export function Library() {
     );
   }
 
-  // Authentication required state
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-primary mb-6">Library</h1>
-          <div className="bg-background border border-primary/20 rounded-xl p-8 text-center shadow-sm">
-            <h3 className="text-primary font-medium mb-2">Sign in required</h3>
-            <p className="text-primary/70">Please sign in to view your verse library.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return null
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-primary mb-6">Library</h1>
-          <div className="space-y-6">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="space-y-4">
-                <div className="h-8 bg-primary/10 rounded-lg animate-pulse w-32"></div>
-                <div className="bg-background border border-primary/10 rounded-xl p-6 animate-pulse shadow-sm">
-                  <div className="h-6 bg-primary/10 rounded mb-4 w-1/3"></div>
-                  <div className="h-4 bg-primary/10 rounded mb-3"></div>
-                  <div className="h-4 bg-primary/10 rounded mb-3 w-2/3"></div>
-                  <div className="h-3 bg-primary/10 rounded w-1/4"></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Empty state
   if (verses.length === 0) {
     return (
       <div className="min-h-screen bg-background p-4">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-2xl font-bold text-primary mb-6">Library</h1>
           <div className="bg-background border border-primary/10 rounded-xl p-12 text-center shadow-sm">
-            <div className="text-5xl mb-6">📚</div>
             <h3 className="text-primary font-medium mb-3 text-lg">Your library is empty</h3>
             <p className="text-primary/70 mb-8 max-w-md mx-auto">
-              Start building your verse collection by adding your first verse.
+              Start memorizing by adding your first verse.
             </p>
             <a
               href="/add"
-              className="inline-flex items-center px-6 py-3 bg-accent text-white rounded-xl hover:bg-accent/90 transition-colors font-medium shadow-sm"
+              className="inline-flex items-center px-6 py-3 bg-accent border border-primary/20 rounded-xl hover:bg-accent/90 font-medium"
             >
-              Add Your First Verse
+              Add Verse
             </a>
           </div>
         </div>
@@ -227,7 +188,7 @@ export function Library() {
         </div>
       </div>
 
-      {/* Scrollable Content - starts immediately after border */}
+      {/* Scrollable Content */}
       <div className="max-w-6xl mx-auto px-4 pt-6 pb-8 sm:px-6 lg:px-8">
 
         {/* Books and Verses */}
@@ -237,7 +198,7 @@ export function Library() {
               {/* Book Header */}
               <button
                 onClick={() => toggleBook(book)}
-                className="w-full px-4 py-3 text-left hover:bg-primary/5 transition-all duration-200 ease-in-out flex items-center justify-between rounded-lg"
+                className="w-full px-4 py-1 text-left hover:bg-primary/5 transition-all duration-200 ease-in-out flex items-center justify-between rounded-lg"
               >
                 <span className="font-medium text-primary text-lg">{book}</span>
                 <svg
@@ -256,7 +217,7 @@ export function Library() {
               <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
                 expandedBooks.has(book) ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'
               }`}>
-                <div className="ml-6 pt-1">
+                <div className="ml-4 pt-1">
                   {bookVerses.map((verseCard, index) => (
                     <button
                       key={verseCard.id}

@@ -4,6 +4,10 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  safelist: [
+    'font-crimson',
+    'font-roboto',
+  ],
   theme: {
     extend: {
       colors: {
