@@ -5,6 +5,11 @@ import { TextEncoder, TextDecoder } from 'util';
 (global as any).TextEncoder = TextEncoder;
 (global as any).TextDecoder = TextDecoder;
 
+// Polyfill for structuredClone (needed for fake-indexeddb)
+if (!(global as any).structuredClone) {
+  (global as any).structuredClone = (obj: any) => JSON.parse(JSON.stringify(obj));
+}
+
 // Mock environment variables for testing
 process.env.NODE_ENV = 'test';
 process.env.VITE_ESV_API_KEY = 'test_esv_api_key_123456789abcdef';

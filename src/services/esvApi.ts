@@ -87,7 +87,6 @@ class ESVApiClient {
         method: 'GET',
         headers: {
           'Authorization': `Token ${this.apiKey}`,
-          'Content-Type': 'application/json',
           'Accept': 'application/json'
         }
       });

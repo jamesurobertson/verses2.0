@@ -146,7 +146,11 @@ export function createSupabaseClient(): TypedSupabaseClient {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  console.log({ supabaseKey, supabaseUrl })
+  console.log('Supabase config:', { supabaseUrl, supabaseKey: supabaseKey ? 'Present' : 'Missing' });
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
 
   return createClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
@@ -205,12 +209,24 @@ export const db = {
   // Verses operations (shared cache)
   verses: {
     async getByReference(reference: string, translation: string = 'ESV') {
-      return supabaseClient
+      console.log('Supabase getByReference:', { reference, translation });
+      
+      // Check auth status
+      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+      console.log('Auth session:', { 
+        hasSession: !!session, 
+        sessionError, 
+        userId: session?.user?.id 
+      });
+      
+      const result = await supabaseClient
         .from('verses')
         .select('*')
         .eq('reference', reference)
         .eq('translation', translation)
-        .single();
+        .maybeSingle(); // Use maybeSingle() instead of single() to handle 0 results gracefully
+      console.log('Supabase getByReference result:', result);
+      return result;
     },
 
     async getById(id: string) {
@@ -222,11 +238,23 @@ export const db = {
     },
 
     async create(verse: Database['public']['Tables']['verses']['Insert']) {
-      return supabaseClient
+      console.log('Supabase create verse:', verse);
+      
+      // Check auth status
+      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+      console.log('Auth session for create:', { 
+        hasSession: !!session, 
+        sessionError, 
+        userId: session?.user?.id 
+      });
+      
+      const result = await supabaseClient
         .from('verses')
         .insert(verse)
         .select()
         .single();
+      console.log('Supabase create verse result:', result);
+      return result;
     },
 
     async findOrCreate(reference: string, text: string, translation: string = 'ESV') {
@@ -286,11 +314,31 @@ export const db = {
     },
 
     async create(card: Database['public']['Tables']['verse_cards']['Insert']) {
-      return supabaseClient
+      console.log('Supabase create verse card:', card);
+      
+      // Check auth status
+      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+      console.log('Auth session for card create:', { 
+        hasSession: !!session, 
+        sessionError, 
+        userId: session?.user?.id 
+      });
+      
+      const result = await supabaseClient
         .from('verse_cards')
         .insert(card)
         .select()
         .single();
+      console.log('Supabase create verse card result:', result);
+      if (result.error) {
+        console.error('Verse card creation error details:', {
+          code: result.error.code,
+          message: result.error.message,
+          details: result.error.details,
+          hint: result.error.hint
+        });
+      }
+      return result;
     },
 
     async update(id: string, updates: Database['public']['Tables']['verse_cards']['Update'], userId: string) {

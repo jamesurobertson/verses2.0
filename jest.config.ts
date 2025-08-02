@@ -1,6 +1,7 @@
 export default {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  setupFiles: ['fake-indexeddb/auto'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',

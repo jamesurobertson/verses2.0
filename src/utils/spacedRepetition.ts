@@ -1,25 +1,13 @@
 // Spaced Repetition System Implementation
 
+import { formatDateToYYYYMMDD } from './dateUtils';
+
 export type ReviewPhase = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 
-export interface VerseCard {
-  id: string;
-  verse: {
-    reference: string;
-    text: string;
-    translation: string;
-  };
-  currentPhase: ReviewPhase;
-  phaseProgressCount: number;
-  lastReviewedAt: Date | null;
-  nextDueDate: Date;
-  archived: boolean;
-}
-
 export interface ReviewResult {
-  newPhase: ReviewPhase;
-  newProgressCount: number;
-  nextDueDate: Date;
+  current_phase: ReviewPhase;
+  phase_progress_count: number;
+  next_due_date: string; // YYYY-MM-DD format
   countsTowardProgress: boolean;
 }
 
@@ -71,30 +59,29 @@ export function calculateNextDueDate(phase: ReviewPhase, fromDate: Date = new Da
 
 /**
  * Processes a review and determines the new card state.
+ * Takes current phase and progress, returns database update object.
  */
 export function processReview(
-  card: VerseCard, 
+  currentPhase: ReviewPhase,
+  currentProgress: number,
   wasSuccessful: boolean, 
   countsTowardProgress: boolean
 ): ReviewResult {
   // Validate input
-  if (!PHASE_REQUIREMENTS[card.currentPhase] && card.currentPhase !== 'monthly') {
+  if (!PHASE_REQUIREMENTS[currentPhase] && currentPhase !== 'monthly') {
     throw new Error('Invalid phase or progress count');
   }
   
-  if (card.phaseProgressCount < 0) {
+  if (currentProgress < 0) {
     throw new Error('Invalid phase or progress count');
   }
-
-  const currentPhase = card.currentPhase;
-  const currentProgress = card.phaseProgressCount;
   
   // If this doesn't count toward progress, return current state with updated due date
   if (!countsTowardProgress) {
     return {
-      newPhase: currentPhase,
-      newProgressCount: currentProgress,
-      nextDueDate: calculateNextDueDate(currentPhase),
+      current_phase: currentPhase,
+      phase_progress_count: currentProgress,
+      next_due_date: formatDateToYYYYMMDD(calculateNextDueDate(currentPhase)),
       countsTowardProgress: false
     };
   }
@@ -102,9 +89,9 @@ export function processReview(
   // If review was unsuccessful, stay in same phase with no progress change
   if (!wasSuccessful) {
     return {
-      newPhase: currentPhase,
-      newProgressCount: currentProgress,
-      nextDueDate: calculateNextDueDate(currentPhase),
+      current_phase: currentPhase,
+      phase_progress_count: currentProgress,
+      next_due_date: formatDateToYYYYMMDD(calculateNextDueDate(currentPhase)),
       countsTowardProgress: true
     };
   }
@@ -117,18 +104,18 @@ export function processReview(
   if (newProgress >= phaseRequirement && currentPhase !== 'monthly') {
     const nextPhase = getNextPhase(currentPhase);
     return {
-      newPhase: nextPhase,
-      newProgressCount: 0, // Reset progress for new phase
-      nextDueDate: calculateNextDueDate(nextPhase),
+      current_phase: nextPhase,
+      phase_progress_count: 0, // Reset progress for new phase
+      next_due_date: formatDateToYYYYMMDD(calculateNextDueDate(nextPhase)),
       countsTowardProgress: true
     };
   }
 
   // Stay in current phase with incremented progress
   return {
-    newPhase: currentPhase,
-    newProgressCount: newProgress,
-    nextDueDate: calculateNextDueDate(currentPhase),
+    current_phase: currentPhase,
+    phase_progress_count: newProgress,
+    next_due_date: formatDateToYYYYMMDD(calculateNextDueDate(currentPhase)),
     countsTowardProgress: true
   };
 }
@@ -147,164 +134,3 @@ function getNextPhase(currentPhase: ReviewPhase): ReviewPhase {
   return progression[currentPhase];
 }
 
-/**
- * Filters cards to return only those that are due today or overdue.
- */
-export function getDueCards(cards: VerseCard[]): VerseCard[] {
-  if (!cards || cards.length === 0) {
-    return [];
-  }
-
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  return cards.filter(card => {
-    // Exclude archived cards
-    if (card.archived) {
-      return false;
-    }
-
-    // Include if due date is today or earlier
-    const cardDueDate = new Date(card.nextDueDate);
-    const cardDueDateStart = new Date(
-      cardDueDate.getFullYear(), 
-      cardDueDate.getMonth(), 
-      cardDueDate.getDate()
-    );
-
-    return cardDueDateStart <= todayStart;
-  });
-}
-
-/**
- * Gets cards that are available for additional review (already reviewed today).
- */
-export function getAdditionalReviewCards(cards: VerseCard[]): VerseCard[] {
-  if (!cards || cards.length === 0) {
-    return [];
-  }
-
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-  return cards.filter(card => {
-    // Exclude archived cards
-    if (card.archived) {
-      return false;
-    }
-
-    // Include if already reviewed today (lastReviewedAt is today)
-    if (!card.lastReviewedAt) {
-      return false;
-    }
-
-    const lastReviewed = new Date(card.lastReviewedAt);
-    return lastReviewed >= todayStart && lastReviewed <= todayEnd;
-  });
-}
-
-/**
- * Creates a new verse card with default settings.
- */
-export function createNewVerseCard(
-  _userId: string,
-  verse: { reference: string; text: string; translation: string }
-): Omit<VerseCard, 'id'> {
-  return {
-    verse,
-    currentPhase: 'daily',
-    phaseProgressCount: 0,
-    lastReviewedAt: null,
-    nextDueDate: calculateNextDueDate('daily'), // Due tomorrow
-    archived: false
-  };
-}
-
-/**
- * Checks if a card is due for review today.
- */
-export function isCardDue(card: VerseCard): boolean {
-  const dueCards = getDueCards([card]);
-  return dueCards.length > 0;
-}
-
-/**
- * Gets statistics about a collection of cards.
- */
-export function getCardStats(cards: VerseCard[]) {
-  const stats = {
-    total: cards.length,
-    archived: 0,
-    byPhase: {
-      daily: 0,
-      weekly: 0,
-      biweekly: 0,
-      monthly: 0
-    },
-    due: 0,
-    overdue: 0
-  };
-
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  cards.forEach(card => {
-    if (card.archived) {
-      stats.archived++;
-      return;
-    }
-
-    stats.byPhase[card.currentPhase]++;
-
-    const cardDueDate = new Date(card.nextDueDate);
-    const cardDueDateStart = new Date(
-      cardDueDate.getFullYear(), 
-      cardDueDate.getMonth(), 
-      cardDueDate.getDate()
-    );
-
-    if (cardDueDateStart.getTime() === todayStart.getTime()) {
-      stats.due++;
-    } else if (cardDueDateStart < todayStart) {
-      stats.overdue++;
-    }
-  });
-
-  return stats;
-}
-
-/**
- * Calculates the completion percentage for a card in its current phase.
- */
-export function getPhaseProgress(card: VerseCard): number {
-  const requirement = PHASE_REQUIREMENTS[card.currentPhase];
-  if (requirement === Infinity) {
-    return 100; // Monthly phase is always "complete"
-  }
-  
-  return Math.min(100, (card.phaseProgressCount / requirement) * 100);
-}
-
-/**
- * Estimates when a card will advance to the next phase based on daily review rate.
- */
-export function estimatePhaseAdvancement(card: VerseCard, dailySuccessRate = 0.8): Date | null {
-  const requirement = PHASE_REQUIREMENTS[card.currentPhase];
-  if (requirement === Infinity) {
-    return null; // Monthly phase doesn't advance
-  }
-
-  const remainingReviews = requirement - card.phaseProgressCount;
-  if (remainingReviews <= 0) {
-    return new Date(); // Already ready to advance
-  }
-
-  // Estimate days needed based on success rate
-  const estimatedDays = Math.ceil(remainingReviews / dailySuccessRate);
-  
-  const estimatedDate = new Date();
-  estimatedDate.setDate(estimatedDate.getDate() + estimatedDays);
-  
-  return estimatedDate;
-}

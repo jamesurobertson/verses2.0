@@ -8,8 +8,21 @@ This is a Progressive Web App (PWA) designed to help users memorize Bible verses
 - **Spaced repetition system** with progressive review intervals (daily → weekly → biweekly → monthly)
 - **Swipeable card interface** optimized for mobile interaction
 - **User authentication** and cloud sync via Supabase
-- **Offline capabilities** with local storage fallback
+- **Dual-write architecture** for offline-first functionality with automatic cloud sync
 - **ESV API integration** for verse content
+
+### Dual-Write Architecture
+
+The app uses an innovative **offline-first dual-write architecture** that provides seamless functionality regardless of network connectivity:
+
+- **Local-First Storage**: All data is immediately saved to IndexedDB using Dexie for instant app responsiveness
+- **Automatic Cloud Sync**: Changes are automatically synced to Supabase when network is available
+- **Graceful Degradation**: App continues working fully offline; syncs when connection is restored
+- **Conflict Resolution**: Local data takes precedence with remote sync as enhancement, not requirement
+
+This approach ensures users can add verses, practice memorization, and track progress even without internet connection, while still benefiting from cloud backup and cross-device synchronization when online.
+
+*See [docs/dexie-overview.md](docs/dexie-overview.md) for detailed technical documentation.*
 
 ## Architecture
 

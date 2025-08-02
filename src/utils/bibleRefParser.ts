@@ -227,7 +227,7 @@ export function parseBibleReference(reference: string): ParsedReference {
   const book = normalizeBookName(bookPart);
   const chapter = parseInt(chapterStr, 10);
   const startVerse = startVerseStr ? parseInt(startVerseStr, 10) : null;
-  const endVerse = endVerseStr ? parseInt(endVerseStr, 10) : startVerse;
+  const endVerse = endVerseStr ? parseInt(endVerseStr, 10) : null;
   
   if (chapter < 1) {
     throw new Error('Invalid chapter number');
