@@ -1,0 +1,200 @@
+/**
+ * VerseStack Component Styles
+ * Layout for card stack with progress tracking and empty states
+ */
+
+.verse-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.verse-stack--empty {
+  justify-content: center;
+}
+
+/* Progress indicator */
+.verse-stack__progress {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 24px;
+}
+
+.verse-stack__progress-text {
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 8px;
+}
+
+.verse-stack__progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.verse-stack__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Card stack container */
+.verse-stack__cards {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  height: 500px;
+  margin-bottom: 24px;
+}
+
+.verse-stack__card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.verse-stack__card--current {
+  z-index: 2;
+}
+
+.verse-stack__card--next {
+  z-index: 1;
+  transform: translateY(10px) scale(0.95);
+  opacity: 0.5;
+  pointer-events: none;
+  filter: blur(1px);
+}
+
+/* Session stats */
+.verse-stack__stats {
+  display: flex;
+  gap: 32px;
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.verse-stack__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.verse-stack__stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.verse-stack__stat-label {
+  font-size: 0.875rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* Empty state */
+.verse-stack__empty-content {
+  text-align: center;
+  max-width: 300px;
+  padding: 40px 20px;
+}
+
+.verse-stack__empty-icon {
+  font-size: 4rem;
+  margin-bottom: 24px;
+  display: block;
+}
+
+.verse-stack__empty-title {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 16px;
+  margin-top: 0;
+}
+
+.verse-stack__empty-message {
+  font-size: 1.125rem;
+  color: #64748b;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .verse-stack {
+    padding: 16px;
+  }
+  
+  .verse-stack__cards {
+    height: 450px;
+  }
+  
+  .verse-stack__stats {
+    gap: 24px;
+  }
+  
+  .verse-stack__stat-value {
+    font-size: 1.25rem;
+  }
+  
+  .verse-stack__empty-icon {
+    font-size: 3rem;
+  }
+  
+  .verse-stack__empty-title {
+    font-size: 1.5rem;
+  }
+  
+  .verse-stack__empty-message {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .verse-stack__cards {
+    height: 400px;
+  }
+  
+  .verse-stack__progress-text {
+    font-size: 0.875rem;
+  }
+}
+
+/* Animation improvements for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .verse-stack__progress-fill {
+    transition: none;
+  }
+  
+  .verse-stack__card--next {
+    transform: translateY(5px) scale(0.98);
+    filter: none;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .verse-stack {
+    background: #ffffff;
+  }
+  
+  .verse-stack__progress-bar {
+    background: #000000;
+    border: 1px solid #ffffff;
+  }
+  
+  .verse-stack__progress-fill {
+    background: #0066cc;
+  }
+}

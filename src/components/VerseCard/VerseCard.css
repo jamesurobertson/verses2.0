@@ -1,0 +1,211 @@
+/**
+ * VerseCard Component Styles
+ * Mobile-first responsive design for Bible memorization cards
+ */
+
+.verse-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  height: 500px;
+  margin: 0 auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: pan-y; /* Allow vertical scrolling, handle horizontal pan in JS */
+}
+
+.verse-card:active {
+  cursor: grabbing;
+}
+
+.verse-card__content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 20px;
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.1),
+    0 8px 16px rgba(0, 0, 0, 0.1);
+  color: white;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: center;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.verse-card__content:hover {
+  box-shadow: 
+    0 25px 50px rgba(0, 0, 0, 0.15),
+    0 12px 24px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.verse-card__content:focus {
+  outline: 3px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+.verse-card__main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.verse-card__text {
+  font-size: 1.25rem;
+  line-height: 1.6;
+  font-weight: 400;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  word-wrap: break-word;
+  hyphens: auto;
+}
+
+/* Larger text for references */
+.verse-card__text:not(:has-text-content) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.verse-card__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+}
+
+.verse-card__stats {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.verse-card__streak {
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.verse-card__phase {
+  font-size: 0.875rem;
+  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.verse-card__translation {
+  font-size: 0.875rem;
+  opacity: 0.8;
+  font-weight: 500;
+}
+
+.verse-card__hints {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.verse-card__hint {
+  position: absolute;
+  font-size: 3rem;
+  font-weight: bold;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.verse-card__hint--left {
+  left: 24px;
+  color: #ef4444;
+}
+
+.verse-card__hint--right {
+  right: 24px;
+  color: #22c55e;
+}
+
+.verse-card__tap-hint {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Swipe feedback states */
+.verse-card[data-dragging="true"] .verse-card__hint--left {
+  opacity: 1;
+}
+
+.verse-card[data-dragging="true"] .verse-card__hint--right {
+  opacity: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .verse-card {
+    height: 450px;
+  }
+  
+  .verse-card__content {
+    padding: 24px 20px;
+  }
+  
+  .verse-card__text {
+    font-size: 1.125rem;
+  }
+  
+  .verse-card__hint {
+    font-size: 2.5rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .verse-card {
+    height: 400px;
+  }
+  
+  .verse-card__text {
+    font-size: 1rem;
+  }
+  
+  .verse-card__hint {
+    font-size: 2rem;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .verse-card__content {
+    background: #1a1a1a;
+    border: 2px solid #ffffff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .verse-card__content {
+    transition: none;
+  }
+  
+  .verse-card__hint {
+    transition: none;
+  }
+}
