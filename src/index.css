@@ -2,11 +2,32 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Crimson+Text:wght@400;600&display=swap');
 
+/* Color Variables for CSS usage */
+:root {
+  --color-primary: #1C2A39;     /* Deep navy - headers, primary text, navigation icons */
+  --color-accent: #E3B23C;      /* Warm gold - primary buttons, highlights, active states */
+  --color-background: #FAF9F6;  /* Off-white - page background, cards */
+  --color-success: #3CB371;     /* Gentle green - correct review result */
+  --color-error: #FF6F61;       /* Soft coral - needs work result */
+}
+
 body {
   margin: 0;
   font-family: 'Roboto', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth animations for Library */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 #root {

@@ -27,3 +27,12 @@ export function getDateStringDaysFromNow(days: number, fromDate: Date = new Date
   targetDate.setDate(targetDate.getDate() + days);
   return formatDateToYYYYMMDD(targetDate);
 }
+
+/**
+ * Parses a YYYY-MM-DD date string as a local date (not UTC)
+ * This prevents timezone conversion issues when displaying dates
+ */
+export function parseLocalDate(dateString: string): Date {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day); // month is 0-indexed
+}

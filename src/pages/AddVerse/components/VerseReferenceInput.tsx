@@ -44,7 +44,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
   };
 
   // Handle Enter key submission
-  const handleKeyDown = (e: React.KeyEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       // Trigger form submission via parent component
@@ -55,16 +55,16 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
     }
   };
 
-  // Dynamic styling based on validation state
+  // Dynamic styling based on validation state using design system colors
   const getInputStyles = () => {
-    const baseStyles = 'w-full px-4 py-3 text-lg border rounded-lg focus:outline-none focus:ring-2 transition-colors';
+    const baseStyles = 'w-full px-4 py-4 text-lg border rounded-lg focus:outline-none focus:ring-2 transition-colors font-roboto bg-white';
     
     if (validationError) {
-      return `${baseStyles} border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50`;
+      return `${baseStyles} border-error focus:border-error focus:ring-error/20 bg-error/5 text-primary`;
     } else if (value.trim() && !isValidating && !validationError) {
-      return `${baseStyles} border-green-300 focus:border-green-500 focus:ring-green-200 bg-green-50`;
+      return `${baseStyles} border-success focus:border-success focus:ring-success/20 bg-success/5 text-primary`;
     } else {
-      return `${baseStyles} border-gray-300 focus:border-blue-500 focus:ring-blue-200`;
+      return `${baseStyles} border-primary/20 focus:border-accent focus:ring-accent/20 text-primary`;
     }
   };
 
@@ -88,21 +88,21 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
       />
       
       {/* Validation indicator */}
-      <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+      <div className="absolute inset-y-0 right-0 flex items-center pr-4">
         {isValidating && (
           <div className="w-5 h-5">
-            <div className="w-5 h-5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
+            <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin"></div>
           </div>
         )}
         {!isValidating && value.trim() && !validationError && (
-          <div className="w-5 h-5 text-green-500">
+          <div className="w-5 h-5 text-success">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
             </svg>
           </div>
         )}
         {!isValidating && validationError && (
-          <div className="w-5 h-5 text-red-500">
+          <div className="w-5 h-5 text-error">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
@@ -112,14 +112,14 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
       
       {/* Error message */}
       {validationError && (
-        <p className="mt-2 text-sm text-red-600" role="alert">
+        <p className="mt-3 text-sm text-error font-medium" role="alert">
           {validationError}
         </p>
       )}
       
       {/* Helper text */}
       {!validationError && (
-        <p className="mt-2 text-sm text-gray-500">
+        <p className="mt-3 text-sm text-primary/60">
           Examples: John 3:16, Romans 8:28-30, 1 Corinthians 13:4-7
         </p>
       )}

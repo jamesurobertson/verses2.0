@@ -7,8 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
-import { dataService } from '../../../services/dataService';
-import { localDb, type LocalDBSchema } from '../../../services/localDb';
+import { localDb } from '../../../services/localDb';
 import { getTodayString } from '../../../utils/dateUtils';
 
 // Library-specific verse card interface

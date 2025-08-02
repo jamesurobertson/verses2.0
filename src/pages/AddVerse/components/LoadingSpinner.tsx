@@ -38,14 +38,14 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     }
   };
 
-  const spinnerStyles = `${getSizeStyles()} border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin`;
-  const containerStyles = `flex items-center justify-center ${getContainerStyles()} ${className}`.trim();
+  const spinnerStyles = `${getSizeStyles()} border-2 border-accent/30 border-t-accent rounded-full animate-spin`;
+  const containerStyles = `flex items-center justify-center font-roboto ${getContainerStyles()} ${className}`.trim();
 
   return (
     <div className={containerStyles} data-testid={testId} role="status" aria-live="polite">
       <div className={spinnerStyles} aria-hidden="true"></div>
       {message && (
-        <span className="text-gray-600">
+        <span className="text-primary/70">
           {message}
         </span>
       )}

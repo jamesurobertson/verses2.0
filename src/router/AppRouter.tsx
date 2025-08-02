@@ -38,9 +38,9 @@ export function AppRouter() {
 
   // Authenticated user routes with mobile navigation
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col">
       {/* Main content area */}
-      <main className="flex-1 pb-16 md:pb-0">
+      <main className="flex-1 overflow-y-auto" style={{ paddingBottom: '57px' }}>
         <Routes>
           {/* Default route redirects to review */}
           <Route path="/" element={<Navigate to="/review" replace />} />

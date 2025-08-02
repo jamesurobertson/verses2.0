@@ -125,7 +125,6 @@ export const dataService = {
       
       // Step 3: Create verse card for this user
       const nextDueDate = getTodayString();
-      console.log('DEBUG: Creating new verse card with date:', nextDueDate, 'Today should be:', new Date().toLocaleDateString());
       
       const localVerseCard = await localDb.verseCards.create({
         user_id: userId,

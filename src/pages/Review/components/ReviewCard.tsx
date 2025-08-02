@@ -40,10 +40,10 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
   };
 
   const phaseColors = {
-    daily: 'bg-green-100 text-green-800',
-    weekly: 'bg-blue-100 text-blue-800',
-    biweekly: 'bg-yellow-100 text-yellow-800',
-    monthly: 'bg-purple-100 text-purple-800'
+    daily: 'bg-success/10 text-success',
+    weekly: 'bg-primary/10 text-primary',
+    biweekly: 'bg-accent/10 text-accent',
+    monthly: 'bg-error/10 text-error'
   };
 
   const phaseLabels = {
@@ -57,21 +57,21 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
     <div className="w-full max-w-2xl mx-auto">
       {/* Progress indicator */}
       {showProgress && progress && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+        <div className="mb-6">
+          <div className="flex items-center justify-between text-sm text-primary/70 mb-3">
             <span>Card {progress.current} of {progress.total}</span>
             <span className="flex items-center gap-2">
               {currentStreak > 0 && (
                 <>
-                  <span className="text-orange-600">🔥</span>
-                  <span className="font-medium">{currentStreak} streak</span>
+                  <span className="text-accent">🔥</span>
+                  <span className="font-medium text-primary">{currentStreak} streak</span>
                 </>
               )}
             </span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="w-full bg-primary/10 rounded-full h-2">
             <div 
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              className="bg-accent h-2 rounded-full transition-all duration-300"
               style={{ width: `${(progress.current / progress.total) * 100}%` }}
             />
           </div>
@@ -79,41 +79,52 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
       )}
 
       {/* Main card */}
-      <div className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-8 min-h-[400px] flex flex-col">
+      <div className="bg-background rounded-xl shadow-lg border border-primary/10 p-8 min-h-[500px] flex flex-col">
         {/* Header */}
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              {verse.reference}
-            </h2>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${phaseColors[currentPhase]}`}>
-              {phaseLabels[currentPhase]} Phase
-            </span>
+        <div className="text-center mb-8">
+          <h2 className="font-crimson text-3xl font-semibold text-primary mb-4">
+            {verse.reference}
+          </h2>
+          
+          {/* Tally marks below reference */}
+          <div className="flex justify-center gap-1 mb-4">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div
+                key={i}
+                className={`w-3 h-8 rounded-sm ${
+                  i < currentStreak ? 'bg-accent' : 'bg-primary/20'
+                }`}
+              />
+            ))}
           </div>
+          
+          <span className={`px-3 py-1 rounded-full text-sm font-medium ${phaseColors[currentPhase]}`}>
+            {phaseLabels[currentPhase]} Phase
+          </span>
         </div>
 
         {/* Verse content area */}
         <div className="flex-1 flex flex-col justify-center mb-8">
           {!showingText ? (
             <div className="text-center">
-              <div className="text-6xl mb-4">📖</div>
-              <p className="text-gray-600 text-lg mb-6">
+              <div className="text-6xl mb-6">📖</div>
+              <p className="text-primary/70 text-lg mb-8 max-w-md mx-auto leading-relaxed">
                 Try to recite this verse from memory, then reveal to check your answer.
               </p>
               <button
                 onClick={handleToggleText}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium text-lg hover:bg-blue-700 transition-colors"
+                className="w-full px-6 py-4 bg-accent text-white rounded-lg font-medium text-lg hover:bg-accent/90 transition-colors"
                 disabled={hasAnswered}
               >
-                Reveal Verse
+                Show Verse
               </button>
             </div>
           ) : (
-            <div className="text-center">
-              <blockquote className="text-xl leading-relaxed text-gray-800 mb-4 font-serif">
+            <div className="text-center px-4">
+              <blockquote className="font-crimson text-xl leading-relaxed text-primary mb-6 max-w-lg mx-auto">
                 "{verse.text}"
               </blockquote>
-              <cite className="text-gray-600 font-medium">
+              <cite className="font-crimson text-primary/70 font-medium">
                 {verse.reference} ({verse.translation})
               </cite>
             </div>
@@ -122,20 +133,20 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
 
         {/* Action buttons */}
         {showingText && !hasAnswered && (
-          <div className="flex gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
               onClick={handleIncorrect}
-              className="px-8 py-3 bg-red-600 text-white rounded-lg font-medium text-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+              className="w-full sm:w-auto px-8 py-4 bg-error text-white rounded-lg font-medium text-lg hover:bg-error/90 transition-colors flex items-center justify-center gap-2"
             >
               <span>❌</span>
-              Need Practice
+              Needs Work
             </button>
             <button
               onClick={handleCorrect}
-              className="px-8 py-3 bg-green-600 text-white rounded-lg font-medium text-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+              className="w-full sm:w-auto px-8 py-4 bg-success text-white rounded-lg font-medium text-lg hover:bg-success/90 transition-colors flex items-center justify-center gap-2"
             >
               <span>✅</span>
-              Got It Right
+              Correct
             </button>
           </div>
         )}
@@ -144,7 +155,7 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
         {hasAnswered && (
           <div className="text-center">
             <div className="text-4xl mb-2">🎯</div>
-            <p className="text-gray-600">
+            <p className="text-primary/70">
               Moving to next card...
             </p>
           </div>
@@ -153,7 +164,7 @@ export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, pr
 
       {/* Instructions */}
       {!showingText && !hasAnswered && (
-        <div className="mt-4 text-center text-sm text-gray-500">
+        <div className="mt-6 text-center text-sm text-primary/50">
           <p>💡 Try to recite the verse from memory before revealing</p>
         </div>
       )}
