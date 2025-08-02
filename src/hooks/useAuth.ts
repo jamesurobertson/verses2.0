@@ -51,7 +51,6 @@ export function useAuth() {
   };
 
   const signUp = (email: string, password: string) => {
-    console.log({email, password})
     return supabaseClient.auth.signUp({ email, password });
   };
 

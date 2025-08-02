@@ -146,7 +146,7 @@ export function createSupabaseClient(): TypedSupabaseClient {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  console.log({supabaseClient, supabaseKey})
+  console.log({ supabaseKey, supabaseUrl })
 
   return createClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
@@ -166,6 +166,7 @@ export function createSupabaseClient(): TypedSupabaseClient {
 
 // Export singleton client instance
 export const supabaseClient = createSupabaseClient();
+console.log({ supabaseClient })
 
 // Helper types for common operations
 export type UserProfile = {
@@ -234,7 +235,7 @@ export const db = {
       if (existing.data) {
         return existing;
       }
-      
+
       // If not found, create new verse
       // Handle potential race condition where another user creates the same verse
       try {
@@ -363,7 +364,7 @@ export const db = {
     async getStats(userId: string, days: number = 30) {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - days);
-      
+
       return supabaseClient
         .from('review_logs')
         .select('*')
