@@ -205,3 +205,24 @@ AND vc.next_due_date <= CURRENT_DATE;
 -- Grant permissions
 GRANT SELECT ON due_cards_view TO authenticated;
 GRANT SELECT, INSERT ON verses TO authenticated;
+
+-- Function to create a review log when a verse_card is inserted
+CREATE OR REPLACE FUNCTION create_review_log_for_verse_card()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Insert a new review log entry for the newly created verse_card
+  INSERT INTO review_logs (verse_card_id, user_id, created_at)
+  VALUES (NEW.id, NEW.user_id, NOW());
+  
+  RETURN NEW;
+END;
+$$;
+
+-- Create the trigger
+CREATE TRIGGER verse_card_review_log_trigger
+AFTER INSERT ON verse_cards
+FOR EACH ROW
+EXECUTE FUNCTION create_review_log_for_verse_card();
