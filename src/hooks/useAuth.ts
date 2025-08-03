@@ -50,8 +50,20 @@ export function useAuth() {
     return supabaseClient.auth.signInWithPassword({ email, password });
   };
 
-  const signUp = (email: string, password: string) => {
-    return supabaseClient.auth.signUp({ email, password });
+  const signUp = (email: string, password: string, fullName?: string) => {
+    // Detect user's timezone automatically
+    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
+    return supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName || email.split('@')[0], // Use part before @ as default name
+          timezone: userTimezone
+        }
+      }
+    });
   };
 
   const signOut = () => {

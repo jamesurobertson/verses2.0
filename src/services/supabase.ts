@@ -7,17 +7,21 @@ export interface Database {
       user_profiles: {
         Row: {
           id: string;
+          user_id: string;
           email: string | null;
           full_name: string | null;
+          timezone: string;
           preferred_translation: string;
           reference_display_mode: 'full' | 'first' | 'blank';
           created_at: string;
           updated_at: string;
         };
         Insert: {
-          id: string;
+          id?: string;
+          user_id: string;
           email?: string | null;
           full_name?: string | null;
+          timezone?: string;
           preferred_translation?: string;
           reference_display_mode?: 'full' | 'first' | 'blank';
           created_at?: string;
@@ -25,8 +29,10 @@ export interface Database {
         };
         Update: {
           id?: string;
+          user_id?: string;
           email?: string | null;
           full_name?: string | null;
+          timezone?: string;
           preferred_translation?: string;
           reference_display_mode?: 'full' | 'first' | 'blank';
           created_at?: string;
@@ -39,6 +45,7 @@ export interface Database {
           reference: string;
           text: string;
           translation: string;
+          aliases: string[];
           created_at: string;
           updated_at: string;
         };
@@ -47,6 +54,7 @@ export interface Database {
           reference: string;
           text: string;
           translation?: string;
+          aliases?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -55,6 +63,7 @@ export interface Database {
           reference?: string;
           text?: string;
           translation?: string;
+          aliases?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -68,6 +77,9 @@ export interface Database {
           phase_progress_count: number;
           last_reviewed_at: string | null;
           next_due_date: string;
+          assigned_day_of_week: number | null;
+          assigned_week_parity: number | null;
+          assigned_day_of_month: number | null;
           archived: boolean;
           current_streak: number;
           best_streak: number;
@@ -82,6 +94,9 @@ export interface Database {
           phase_progress_count?: number;
           last_reviewed_at?: string | null;
           next_due_date: string;
+          assigned_day_of_week?: number | null;
+          assigned_week_parity?: number | null;
+          assigned_day_of_month?: number | null;
           archived?: boolean;
           current_streak?: number;
           best_streak?: number;
@@ -96,6 +111,9 @@ export interface Database {
           phase_progress_count?: number;
           last_reviewed_at?: string | null;
           next_due_date?: string;
+          assigned_day_of_week?: number | null;
+          assigned_week_parity?: number | null;
+          assigned_day_of_month?: number | null;
           archived?: boolean;
           current_streak?: number;
           best_streak?: number;

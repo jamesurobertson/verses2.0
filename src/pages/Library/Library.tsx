@@ -42,7 +42,7 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
   const grouped = verses.reduce((acc, verse) => {
     const book = getBookFromReference(verse.verse.reference);
     const testament = getTestament(book);
-    
+
     if (!acc[testament]) {
       acc[testament] = {};
     }
@@ -61,10 +61,10 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
       const indexB = bookOrder.indexOf(b);
       return indexA - indexB;
     });
-    
+
     const newGrouped = {} as Record<string, LibraryVerseCard[]>;
     sortedBooks.forEach(book => {
-      newGrouped[book] = grouped[testament][book].sort((a, b) => 
+      newGrouped[book] = grouped[testament][book].sort((a, b) =>
         a.verse.reference.localeCompare(b.verse.reference)
       );
     });
@@ -132,9 +132,12 @@ export function Library() {
 
   if (verses.length === 0) {
     return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-primary mb-6">Library</h1>
+      <div className="bg-background">
+        <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
+
+          <div className="mb-4">
+            <h1 className="text-3xl font-bold text-primary">Library</h1>
+          </div>
           <div className="bg-background border border-primary/10 rounded-xl p-12 text-center shadow-sm">
             <h3 className="text-primary font-medium mb-3 text-lg">Your library is empty</h3>
             <p className="text-primary/70 mb-8 max-w-md mx-auto">
@@ -147,7 +150,7 @@ export function Library() {
               Add Verse
             </a>
           </div>
-        </div>
+        </div >
       </div>
     );
   }
@@ -166,21 +169,19 @@ export function Library() {
           <div className="flex border-b border-primary/20">
             <button
               onClick={() => setActiveTestament('Old Testament')}
-              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${
-                activeTestament === 'Old Testament'
-                  ? 'text-primary border-accent'
-                  : 'text-primary/60 hover:text-primary/80 border-transparent'
-              }`}
+              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'Old Testament'
+                ? 'text-primary border-accent'
+                : 'text-primary/60 hover:text-primary/80 border-transparent'
+                }`}
             >
               Old Testament
             </button>
             <button
               onClick={() => setActiveTestament('New Testament')}
-              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${
-                activeTestament === 'New Testament'
-                  ? 'text-primary border-accent'
-                  : 'text-primary/60 hover:text-primary/80 border-transparent'
-              }`}
+              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'New Testament'
+                ? 'text-primary border-accent'
+                : 'text-primary/60 hover:text-primary/80 border-transparent'
+                }`}
             >
               New Testament
             </button>
@@ -202,9 +203,8 @@ export function Library() {
               >
                 <span className="font-medium text-primary text-lg">{book}</span>
                 <svg
-                  className={`w-5 h-5 text-primary/40 transition-all duration-300 ease-in-out transform ${
-                    expandedBooks.has(book) ? 'rotate-180' : 'rotate-0'
-                  }`}
+                  className={`w-5 h-5 text-primary/40 transition-all duration-300 ease-in-out transform ${expandedBooks.has(book) ? 'rotate-180' : 'rotate-0'
+                    }`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -214,16 +214,15 @@ export function Library() {
               </button>
 
               {/* Verses List with smooth expand/collapse */}
-              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                expandedBooks.has(book) ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'
-              }`}>
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedBooks.has(book) ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0'
+                }`}>
                 <div className="ml-4 pt-1">
                   {bookVerses.map((verseCard, index) => (
                     <button
                       key={verseCard.id}
                       onClick={() => handleVerseClick(verseCard)}
                       className="w-full px-4 py-3 text-left hover:bg-primary/5 transition-all duration-200 ease-in-out flex items-center justify-between rounded-lg"
-                      style={{ 
+                      style={{
                         animationDelay: expandedBooks.has(book) ? `${index * 50}ms` : '0ms',
                         animation: expandedBooks.has(book) ? 'fadeInUp 0.3s ease-out forwards' : 'none'
                       }}

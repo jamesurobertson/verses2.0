@@ -9,6 +9,7 @@ export function Auth() {
   const { signIn, signUp, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,7 +21,7 @@ export function Auth() {
 
     try {
       const result = isSignUp 
-        ? await signUp(email, password)
+        ? await signUp(email, password, name || undefined)
         : await signIn(email, password);
 
       console.log('🔐 Auth result:', { success: !result.error, error: result.error });
@@ -49,6 +50,18 @@ export function Auth() {
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-4">
+          {isSignUp && (
+            <div>
+              <input
+                type="text"
+                placeholder="Full Name (optional)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full py-3 px-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          )}
+          
           <div>
             <input
               type="email"

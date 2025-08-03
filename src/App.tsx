@@ -1,5 +1,6 @@
 import { BrowserRouter } from 'react-router-dom';
 import { AppProvider } from './contexts/AppContext';
+import { TimezoneProvider } from './contexts/TimezoneContext';
 import { AppRouter } from './router/AppRouter';
 import './App.css';
 
@@ -16,7 +17,9 @@ function App() {
   return (
     <BrowserRouter>
       <AppProvider>
-        <AppRouter />
+        <TimezoneProvider>
+          <AppRouter />
+        </TimezoneProvider>
       </AppProvider>
     </BrowserRouter>
   );

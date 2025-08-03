@@ -7,10 +7,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
+import { useTimezone } from '../../../contexts/TimezoneContext';
 import { localDb } from '../../../services/localDb';
-import { getTodayString } from '../../../utils/dateUtils';
+import { countDueCards } from '../../../utils/assignmentLogic';
 
-// Library-specific verse card interface
+// Library-specific verse card interface with assignment fields
 export interface LibraryVerseCard {
   id: number;
   verse: {
@@ -21,6 +22,9 @@ export interface LibraryVerseCard {
   };
   currentPhase: 'daily' | 'weekly' | 'biweekly' | 'monthly';
   nextDueDate: string;
+  assignedDayOfWeek: number | null;    // 1-7 (Sunday=1) for weekly/biweekly
+  assignedWeekParity: number | null;   // 0 or 1 for biweekly scheduling
+  assignedDayOfMonth: number | null;   // 1-28 for monthly scheduling
   currentStreak: number;
   bestStreak: number;
   lastReviewedAt: string | null;
@@ -40,6 +44,7 @@ interface UseLibraryReturn {
 
 export function useLibrary(): UseLibraryReturn {
   const { user } = useAuth();
+  const { timezone } = useTimezone();
   const [verses, setVerses] = useState<LibraryVerseCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +70,9 @@ export function useLibrary(): UseLibraryReturn {
             },
             currentPhase: card.current_phase,
             nextDueDate: card.next_due_date,
+            assignedDayOfWeek: card.assigned_day_of_week,
+            assignedWeekParity: card.assigned_week_parity,
+            assignedDayOfMonth: card.assigned_day_of_month,
             currentStreak: card.current_streak,
             bestStreak: card.best_streak,
             lastReviewedAt: card.last_reviewed_at,
@@ -125,12 +133,9 @@ export function useLibrary(): UseLibraryReturn {
     refreshLibrary();
   }, [refreshLibrary]);
 
-  // Calculate derived values
+  // Calculate derived values using assignment-aware logic
   const totalCount = verses.length;
-  const dueCount = verses.filter(verse => {
-    const today = getTodayString();
-    return verse.nextDueDate <= today && !verse.archived;
-  }).length;
+  const dueCount = countDueCards(verses, timezone);
 
   return {
     verses,

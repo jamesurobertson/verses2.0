@@ -7,8 +7,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
+import { useTimezone } from '../../../contexts/TimezoneContext';
 import { localDb } from '../../../services/localDb';
 import { dataService } from '../../../services/dataService';
+import { filterDueCards } from '../../../utils/assignmentLogic';
 import type { LibraryVerseCard } from '../../Library/hooks/useLibrary';
 
 interface ReviewSession {
@@ -44,6 +46,7 @@ interface UseReviewReturn {
 
 export function useReview(): UseReviewReturn {
   const { user } = useAuth();
+  const { timezone } = useTimezone();
   const [dueCards, setDueCards] = useState<LibraryVerseCard[]>([]);
   const [todaysCards, setTodaysCards] = useState<LibraryVerseCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +75,9 @@ export function useReview(): UseReviewReturn {
             },
             currentPhase: card.current_phase,
             nextDueDate: card.next_due_date,
+            assignedDayOfWeek: card.assigned_day_of_week,
+            assignedWeekParity: card.assigned_week_parity,
+            assignedDayOfMonth: card.assigned_day_of_month,
             currentStreak: card.current_streak,
             bestStreak: card.best_streak,
             lastReviewedAt: card.last_reviewed_at,
@@ -110,6 +116,9 @@ export function useReview(): UseReviewReturn {
             },
             currentPhase: card.current_phase,
             nextDueDate: card.next_due_date,
+            assignedDayOfWeek: card.assigned_day_of_week,
+            assignedWeekParity: card.assigned_week_parity,
+            assignedDayOfMonth: card.assigned_day_of_month,
             currentStreak: card.current_streak,
             bestStreak: card.best_streak,
             lastReviewedAt: card.last_reviewed_at,
@@ -127,14 +136,15 @@ export function useReview(): UseReviewReturn {
   }, []);
 
   /**
-   * Loads due cards from local database
+   * Loads due cards from local database using assignment-aware logic
    */
   const loadDueCards = useCallback(async (userId: string): Promise<LibraryVerseCard[]> => {
     try {
-      const localDueCards = await localDb.verseCards.getDue(userId);
+      // Load ALL user cards (not just those with due dates)
+      const allUserCards = await localDb.verseCards.getByUser(userId);
       const libraryCards: LibraryVerseCard[] = [];
 
-      for (const card of localDueCards) {
+      for (const card of allUserCards) {
         const verse = await localDb.verses.findById(card.verse_id);
         if (verse) {
           libraryCards.push({
@@ -147,6 +157,9 @@ export function useReview(): UseReviewReturn {
             },
             currentPhase: card.current_phase,
             nextDueDate: card.next_due_date,
+            assignedDayOfWeek: card.assigned_day_of_week,
+            assignedWeekParity: card.assigned_week_parity,
+            assignedDayOfMonth: card.assigned_day_of_month,
             currentStreak: card.current_streak,
             bestStreak: card.best_streak,
             lastReviewedAt: card.last_reviewed_at,
@@ -156,12 +169,13 @@ export function useReview(): UseReviewReturn {
         }
       }
 
-      return libraryCards;
+      // Filter cards using assignment logic instead of simple date comparison
+      return filterDueCards(libraryCards, timezone) as LibraryVerseCard[];
     } catch (error) {
       console.error('Failed to load due cards:', error);
       return [];
     }
-  }, []);
+  }, [timezone]);
 
   /**
    * Refreshes the due cards list
