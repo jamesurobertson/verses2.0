@@ -56,9 +56,16 @@ export function MobileNavigation() {
           <NavLink
             key={path}
             to={path}
-            className="p-2"
+            className="p-2 flex flex-col items-center space-y-1"
           >
-            {({ isActive }) => icon(isActive)}
+            {({ isActive }) => (
+              <>
+                {icon(isActive)}
+                <span className={`text-xs ${isActive ? 'text-yellow-500' : 'text-gray-400'}`}>
+                  {label}
+                </span>
+              </>
+            )}
           </NavLink>
         ))}
       </div>

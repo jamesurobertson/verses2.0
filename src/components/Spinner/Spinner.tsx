@@ -10,7 +10,7 @@ const BookLoader = () => {
   };
 
   return (
-    <>
+    <div className="flex flex-col items-center justify-center min-h-screen">
       <style>{`
         @keyframes draw {
           to {
@@ -28,6 +28,7 @@ const BookLoader = () => {
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
+        aria-label="Loading..."
       >
         <g style={drawAnimation}>
           {/* Book cover */}
@@ -40,7 +41,9 @@ const BookLoader = () => {
           <polyline points="44,44 44,36 38,44" fill="none" />
         </g>
       </svg>
-    </>
+      
+      <p className="mt-4 text-gray-600 text-sm">Loading...</p>
+    </div>
   );
 };
 

@@ -1,5 +1,5 @@
 import { localDb, db, type LocalDBSchema } from './localDb';
-import { db as supabaseDb, supabaseClient } from './supabase';
+import { supabaseClient } from './supabase';
 import { esvApi } from './esvApi';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
 // import { processReview, type ReviewPhase } from '../utils/spacedRepetition';
@@ -50,10 +50,15 @@ export const dataService = {
   /**
    * Adds a new verse with alias-based lookup and dual-write strategy
    */
-  async addVerse(reference: string, userId: string): Promise<DualWriteResult<{
-    verse: LocalDBSchema['verses'];
-    verseCard: LocalDBSchema['verse_cards'];
-  }>> {
+  async addVerse(
+    reference: string,
+    userId: string
+  ): Promise<
+    DualWriteResult<{
+      verse: LocalDBSchema['verses'];
+      verseCard: LocalDBSchema['verse_cards'];
+    }>
+  > {
     const result: DualWriteResult<{
       verse: LocalDBSchema['verses'];
       verseCard: LocalDBSchema['verse_cards'];
@@ -63,106 +68,175 @@ export const dataService = {
       errors: {},
       success: false
     };
-
+  
+    const normalizedInput = normalizeReferenceForLookup(reference);
+    const nextDueDate = getTodayString();
+  
+    let existingVerse: LocalDBSchema['verses'] | undefined =
+      await localDb.verses.findByAlias(normalizedInput);
+  
+    let esvCanonicalRef: string | null = null;
+    let esvVerseText: string | null = null;
+  
     try {
-      // Step 1: Normalize user input for alias lookup
-      const normalizedInput = normalizeReferenceForLookup(reference);
-
-      // Step 2: Check if we already know this reference (alias lookup)
-      let existingVerse = await localDb.verses.findByAlias(normalizedInput);
-
-      if (existingVerse) {
-        // We know this verse - check if THIS USER already has it
-        const existingCard = await localDb.verseCards.findByUserAndVerse(userId, existingVerse.id!);
-        if (existingCard) {
-          throw new DuplicateVerseError(existingVerse.reference, {
-            verse: existingVerse,
-            verseCard: existingCard
-          });
-        }
-      } else {
-        // Unknown reference - query ESV API (they handle complex parsing)
+      // If we don't have it by alias, do ESV lookup up front to get canonical and text
+      if (!existingVerse) {
         const esvResponse = await esvApi.getPassage(reference);
         if (!esvResponse.passages || esvResponse.passages.length === 0) {
           throw new ValidationError('No verse text found for this reference');
         }
-
-        const canonicalRef = esvResponse.canonical;
-        const verseText = esvResponse.passages[0].trim();
-
-        // Check if we already have this canonical reference
-        existingVerse = await localDb.verses.findByReference(canonicalRef);
-
+        esvCanonicalRef = esvResponse.canonical;
+        esvVerseText = esvResponse.passages[0].trim();
+  
+        // Try to resolve by canonical reference locally
+        existingVerse = await localDb.verses.findByReference(esvCanonicalRef);
+      }
+  
+      // Local transaction: dedupe, create verse if needed, create verse card
+      await db.transaction('rw', db.verses, db.verse_cards, async () => {
+        // Re-check alias to avoid race
+        if (!existingVerse) {
+          existingVerse = await localDb.verses.findByAlias(normalizedInput);
+        }
+  
         if (existingVerse) {
-          // Add this user's input as a new alias
-          const currentAliases = existingVerse.aliases || [];
-          if (!currentAliases.includes(normalizedInput)) {
-            await db.verses.update(existingVerse.id!, {
-              aliases: [...currentAliases, normalizedInput]
-            });
-            // Update our local reference
-            existingVerse.aliases = [...currentAliases, normalizedInput];
-          }
-
-          // Check if THIS USER already has this verse
-          const existingCard = await localDb.verseCards.findByUserAndVerse(userId, existingVerse.id!);
+          // Ensure user doesn't already have a card
+          const existingCard = await localDb.verseCards.findByUserAndVerse(
+            userId,
+            existingVerse.id!
+          );
           if (existingCard) {
-            throw new DuplicateVerseError(canonicalRef, {
+            throw new DuplicateVerseError(existingVerse.reference, {
               verse: existingVerse,
               verseCard: existingCard
             });
           }
+        } else if (esvCanonicalRef && esvVerseText !== null) {
+          // Try again by canonical reference for safety
+          existingVerse = await localDb.verses.findByReference(esvCanonicalRef);
+          if (existingVerse) {
+            // Attach alias if missing
+            const currentAliases = existingVerse.aliases || [];
+            if (!currentAliases.includes(normalizedInput)) {
+              await db.verses.update(existingVerse.id!, {
+                aliases: [...currentAliases, normalizedInput]
+              });
+              existingVerse.aliases = [...currentAliases, normalizedInput];
+            }
+  
+            const existingCard = await localDb.verseCards.findByUserAndVerse(
+              userId,
+              existingVerse.id!
+            );
+            if (existingCard) {
+              throw new DuplicateVerseError(esvCanonicalRef, {
+                verse: existingVerse,
+                verseCard: existingCard
+              });
+            }
+          } else {
+            // Create completely new verse
+            existingVerse = await localDb.verses.create({
+              reference: esvCanonicalRef,
+              text: esvVerseText,
+              translation: 'ESV',
+              aliases: [normalizedInput]
+            });
+          }
         } else {
-          // Completely new verse - create it with user's input as first alias
-          existingVerse = await localDb.verses.create({
-            reference: canonicalRef,
-            text: verseText,
-            translation: 'ESV',
-            aliases: [normalizedInput]
-          });
+          // Shouldn't happen: no alias and no ESV data
+          throw new ValidationError('Unable to resolve verse reference');
         }
-      }
-
-      // Step 3: Create verse card for this user
-      const nextDueDate = getTodayString();
-
-      const localVerseCard = await localDb.verseCards.create({
-        user_id: userId,
-        verse_id: existingVerse.id!,
-        current_phase: 'daily',
-        phase_progress_count: 0,
-        last_reviewed_at: null,
-        next_due_date: nextDueDate,
-        assigned_day_of_week: null,     // New daily cards don't need assignment
-        assigned_week_parity: null,     // Will be assigned when they advance to weekly/biweekly
-        assigned_day_of_month: null,    // Will be assigned when they advance to monthly
-        archived: false,
-        current_streak: 0,
-        best_streak: 0
+  
+        // At this point we have a verse and confirmed no duplicate card for this user
+        const localVerseCard = await localDb.verseCards.create({
+          user_id: userId,
+          verse_id: existingVerse.id!,
+          current_phase: 'daily',
+          phase_progress_count: 0,
+          last_reviewed_at: null,
+          next_due_date: nextDueDate,
+          assigned_day_of_week: null,
+          assigned_week_parity: null,
+          assigned_day_of_month: null,
+          archived: false,
+          current_streak: 0,
+          best_streak: 0
+        });
+  
+        result.local = {
+          verse: existingVerse,
+          verseCard: localVerseCard
+        };
       });
-
-      result.local = {
-        verse: existingVerse,
-        verseCard: localVerseCard
-      };
-
-      // Step 4: Sync to remote (graceful degradation on failure)
+  
+      // Remote sync (outside transaction)
       try {
-        // TODO: Implement remote sync with aliases
-        console.warn('Remote sync with aliases not yet implemented');
-      } catch (error) {
+        // Ensure verse exists remotely (by shared UUID)
+        const { data: existingRemoteVerse, error: fetchVerseError } =
+          await supabaseClient
+            .from('verses')
+            .select('*')
+            .eq('id', result.local!.verse.id)
+            .single();
+  
+        if (fetchVerseError && fetchVerseError.code !== 'PGRST116') {
+          // PGRST116 is "no rows" in Supabase-land; proceed to insert if not found
+          // but treat other errors as fatal for remote sync
+          throw fetchVerseError;
+        }
+  
+        if (!existingRemoteVerse) {
+          const { error: insertVerseError } = await supabaseClient
+            .from('verses')
+            .insert({
+              id: result.local!.verse.id,
+              reference: result.local!.verse.reference,
+              text: result.local!.verse.text,
+              translation: result.local!.verse.translation,
+              aliases: result.local!.verse.aliases
+            });
+  
+          if (insertVerseError) {
+            throw insertVerseError;
+          }
+        }
+  
+        // Insert remote verse card with same UUID (ignore duplicate remote errors gracefully)
+        const { error: cardError } = await supabaseClient.from('verse_cards').insert({
+          id: result.local!.verseCard.id,
+          user_id: result.local!.verseCard.user_id,
+          verse_id: result.local!.verseCard.verse_id,
+          current_phase: result.local!.verseCard.current_phase,
+          phase_progress_count: result.local!.verseCard.phase_progress_count,
+          last_reviewed_at: result.local!.verseCard.last_reviewed_at,
+          next_due_date: result.local!.verseCard.next_due_date,
+          assigned_day_of_week: result.local!.verseCard.assigned_day_of_week,
+          assigned_week_parity: result.local!.verseCard.assigned_week_parity,
+          assigned_day_of_month: result.local!.verseCard.assigned_day_of_month,
+          archived: result.local!.verseCard.archived,
+          current_streak: result.local!.verseCard.current_streak,
+          best_streak: result.local!.verseCard.best_streak
+        });
+  
+        if (cardError) {
+          throw cardError;
+        }
+      } catch (err) {
         result.errors.remote = new NetworkError(
           'Failed to sync to remote database - data saved locally',
-          error as Error
+          err as Error
         );
       }
-
+  
       result.success = true;
       return result;
-
     } catch (error) {
       if (error instanceof DuplicateVerseError || error instanceof ValidationError) {
         throw error;
+      }
+      if (!result.local) {
+        result.errors.local = error as Error;
       }
       throw new Error(`Failed to add verse: ${(error as Error).message}`);
     }
@@ -171,7 +245,7 @@ export const dataService = {
   /**
    * Syncs local changes to remote database using content-based matching
    */
-  async syncToRemote(userId: string): Promise<{
+  async syncToRemote(userId: string, lastSyncTimestamp?: string): Promise<{
     synced: number;
     failed: number;
     errors: Error[];
@@ -183,8 +257,15 @@ export const dataService = {
     };
 
     try {
-      // Get all local verse cards for the user
-      const localCards = await localDb.verseCards.getByUser(userId);
+      // Get local verse cards for the user (filter by timestamp if provided)
+      let localCards = await localDb.verseCards.getByUser(userId);
+
+      // Filter by lastSyncTimestamp if provided for incremental sync
+      if (lastSyncTimestamp) {
+        localCards = localCards.filter(card =>
+          new Date(card.updated_at) > new Date(lastSyncTimestamp)
+        );
+      }
 
       for (const localCard of localCards) {
         try {
@@ -194,7 +275,7 @@ export const dataService = {
             throw new Error(`Local verse not found for card ${localCard.id}`);
           }
 
-          // Step 1: Ensure the verse exists remotely
+          // Step 1: Ensure the verse exists remotely (use shared UUID)
           let remoteVerse;
           const { data: existingRemoteVerse } = await supabaseClient
             .from('verses')
@@ -259,7 +340,7 @@ export const dataService = {
             // Update existing card if local is newer
             const localUpdated = new Date(localCard.updated_at);
             const remoteUpdated = new Date(existingRemoteCard.updated_at);
-            
+
             if (localUpdated > remoteUpdated) {
               const { error: updateError } = await supabaseClient
                 .from('verse_cards')
@@ -300,7 +381,7 @@ export const dataService = {
   /**
    * Syncs remote changes to local database using content-based matching
    */
-  async syncFromRemote(userId: string): Promise<{
+  async syncFromRemote(userId: string, lastSyncTimestamp?: string): Promise<{
     synced: number;
     failed: number;
     errors: Error[];
@@ -312,14 +393,21 @@ export const dataService = {
     };
 
     try {
-      // Get all remote verse cards for the user
-      const { data: remoteCards, error: cardsError } = await supabaseClient
+      // Get remote verse cards for the user (filter by timestamp if provided)
+      let query = supabaseClient
         .from('verse_cards')
         .select(`
           *,
           verses!inner(*)
         `)
         .eq('user_id', userId);
+
+      // Filter by lastSyncTimestamp if provided for incremental sync
+      if (lastSyncTimestamp) {
+        query = query.gt('updated_at', lastSyncTimestamp);
+      }
+
+      const { data: remoteCards, error: cardsError } = await query;
 
       if (cardsError) {
         throw cardsError;
@@ -328,10 +416,10 @@ export const dataService = {
       for (const remoteCard of remoteCards || []) {
         try {
           const remoteVerse = remoteCard.verses;
-          
+
           // Step 1: Ensure the verse exists locally
           let localVerse = await localDb.verses.findByReference(
-            remoteVerse.reference, 
+            remoteVerse.reference,
             remoteVerse.translation
           );
 
@@ -347,7 +435,7 @@ export const dataService = {
 
           // Step 2: Check if verse card exists locally
           const localCard = await localDb.verseCards.findByUserAndVerse(
-            userId, 
+            userId,
             localVerse.id!
           );
 
@@ -372,7 +460,7 @@ export const dataService = {
             // Update existing card if remote is newer
             const localUpdated = new Date(localCard.updated_at);
             const remoteUpdated = new Date(remoteCard.updated_at);
-            
+
             if (remoteUpdated > localUpdated) {
               await db.verse_cards.update(localCard.id!, {
                 current_phase: remoteCard.current_phase,
@@ -404,16 +492,21 @@ export const dataService = {
   },
 
   /**
-   * Performs bidirectional sync between local and remote databases
+   * Performs incremental sync between local and remote databases
+   * Only syncs records that have changed since the last sync timestamp
    */
-  async fullSync(userId: string): Promise<{
+  async sync(userId: string, lastSyncTimestamp?: string): Promise<{
     toRemote: { synced: number; failed: number; errors: Error[] };
     fromRemote: { synced: number; failed: number; errors: Error[] };
+    lastSyncTimestamp: string;
   }> {
-    const toRemote = await this.syncToRemote(userId);
-    const fromRemote = await this.syncFromRemote(userId);
-    
-    return { toRemote, fromRemote };
+    const syncTimestamp = new Date().toISOString();
+
+    // Use lastSyncTimestamp to only fetch changed records
+    const toRemote = await this.syncToRemote(userId, lastSyncTimestamp);
+    const fromRemote = await this.syncFromRemote(userId, lastSyncTimestamp);
+
+    return { toRemote, fromRemote, lastSyncTimestamp: syncTimestamp };
   },
 
   /**

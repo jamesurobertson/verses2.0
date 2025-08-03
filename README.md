@@ -44,7 +44,7 @@ src/
 │   ├── VerseCard/      # Individual verse display card
 │   └── VerseStack/     # Stack of review cards with gestures
 ├── contexts/           # React context providers
-│   └── AppContext.tsx  # Global app state management
+│   └── AuthContext.tsx  # Global app state management
 ├── hooks/             # Custom React hooks
 │   ├── useAuth.ts     # Authentication logic
 │   ├── useReview.ts   # Review session management

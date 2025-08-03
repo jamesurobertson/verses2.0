@@ -3,7 +3,7 @@
  * Users can manage preferences, account settings, and app behavior.
  */
 import { useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from "../../contexts/AuthContext";
 
 export function Settings() {
   const { user, signOut } = useAuth();
@@ -17,7 +17,7 @@ export function Settings() {
     }
   };
 
-  const referenceDisplayModeHandler = (preference) => {
+  const referenceDisplayModeHandler = (preference: string) => {
     // todo: sync userProfile cloud and local for reference_display_mode
   }
 

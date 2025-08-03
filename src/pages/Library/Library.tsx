@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { useLibrary, type LibraryVerseCard } from './hooks/useLibrary';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Biblical books organized by testament
 const OLD_TESTAMENT_BOOKS = [

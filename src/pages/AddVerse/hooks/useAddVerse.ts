@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useAuth } from '../../../hooks/useAuth';
+import { useAuth } from '../../../contexts/AuthContext';
 import { dataService, DuplicateVerseError, ValidationError, NetworkError } from '../../../services/dataService';
 import { normalizeReferenceForLookup } from '../../../utils/referenceNormalizer';
 import type { LocalDBSchema } from '../../../services/localDb';
@@ -152,6 +152,11 @@ export function useAddVerse(): UseAddVerseReturn {
         error: 'Please enter a Bible reference'
       }));
       return;
+    }
+
+    // Prevent concurrent calls
+    if (state.isLoading) {
+      return; // Another call is already in progress
     }
 
     setState(prev => ({

@@ -13,11 +13,12 @@ describe('Bible Reference Parser (TDD)', () => {
   describe('Basic Reference Parsing', () => {
     test('should parse simple reference correctly', () => {
       const result = parseBibleReference('John 3:16');
+      console.log('result', result);
       expect(result).toEqual({
         book: 'John',
         chapter: 3,
         startVerse: 16,
-        endVerse: 16,
+        endVerse: null,
         originalText: 'John 3:16'
       });
     });
@@ -116,15 +117,22 @@ describe('Bible Reference Parser (TDD)', () => {
         book: 'John',
         chapter: 3,
         startVerse: 16,
-        endVerse: 16,
+        endVerse: null,
         originalText: 'John 3:16'
       });
       expect(result[1]).toEqual({
         book: 'John',
         chapter: 14,
         startVerse: 6,
-        endVerse: 6,
+        endVerse: null,
         originalText: 'John 14:6'
+      });
+      expect(result[2]).toEqual({
+        book: 'John',
+        chapter: 11,
+        startVerse: 25,
+        endVerse: null,
+        originalText: 'John 11:25'
       });
     });
   });

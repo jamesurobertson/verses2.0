@@ -5,7 +5,7 @@ import { Button } from '../../../components/Button/Button';
 export interface SuccessMessageProps {
   reference: string;
   text: string;
-  verseCard?: { id: number; verse_id: number };
+  verseCard: { id: string; verse_id: number };
   onAddAnother?: () => void;
   onGoToLibrary?: () => void;
   onStartReviewing?: () => void;

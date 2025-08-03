@@ -3,7 +3,7 @@
  * Handles user sign-in and sign-up with Supabase authentication.
  */
 import { useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from "../../contexts/AuthContext";
 
 export function Auth() {
   const { signIn, signUp, loading } = useAuth();

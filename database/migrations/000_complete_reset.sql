@@ -178,7 +178,7 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Create function to find optimal assignment for phase distribution
-CREATE FUNCTION get_optimal_assignment(
+CREATE OR REPLACE FUNCTION get_optimal_assignment(
   user_id_param UUID,
   target_phase TEXT
 ) RETURNS TABLE(
@@ -243,7 +243,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create function to calculate next assigned date
-CREATE FUNCTION calculate_next_assigned_date(
+CREATE OR REPLACE FUNCTION calculate_next_assigned_date(
   phase_name TEXT,
   day_of_week_param INTEGER,
   week_parity_param INTEGER,
@@ -506,9 +506,13 @@ AND (
 -- Grant permissions
 GRANT SELECT ON due_cards_view TO authenticated;
 GRANT SELECT, INSERT ON verses TO authenticated;
+-- Grant permissions for verse_cards table
+GRANT SELECT, INSERT, UPDATE, DELETE ON verse_cards TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON review_logs TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON user_profiles TO authenticated;
 
 -- Function to initialize next_due_date when verse_card is inserted
-CREATE FUNCTION initialize_verse_card()
+CREATE OR REPLACE FUNCTION initialize_verse_card()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER

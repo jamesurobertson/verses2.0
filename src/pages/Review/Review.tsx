@@ -3,9 +3,8 @@
  * This is where users review their verse cards using the new dual-write architecture.
  */
 
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from "../../contexts/AuthContext";
 import { useReview } from './hooks/useReview';
 import { ReviewCard } from './components/ReviewCard';
 

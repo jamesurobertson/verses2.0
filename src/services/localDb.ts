@@ -70,7 +70,7 @@ db.version(10).stores({
   user_profiles: 'id, user_id, timezone, [user_id]',
   verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
   verses: 'id, reference, translation, *aliases, [reference+translation]',
-  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [user_id+verse_card_id]'
+  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]'
 })
 
 // Database hooks for auto-timestamps, UUIDs, and validation
@@ -152,7 +152,7 @@ export const localDb = {
         .first();
     },
 
-    async create(verse: Omit<LocalDBSchema['verses'], 'id' | 'created_at' | 'updated_at'> & { translation?: string; aliases?: string[] }) {
+    async create(verse: Omit<LocalDBSchema['verses'], 'created_at' | 'updated_at'> & { id?: string; translation?: string; aliases?: string[] }) {
       const now = new Date().toISOString();
       const verseData: LocalDBSchema['verses'] = {
         ...verse,
@@ -160,7 +160,7 @@ export const localDb = {
         aliases: verse.aliases || [],
         created_at: now,
         updated_at: now,
-        id: uuidv4()
+        id: verse.id || uuidv4() // Use provided ID or generate new one
       };
 
       await db.verses.add(verseData);
@@ -195,7 +195,7 @@ export const localDb = {
         .first();
     },
 
-    async create(card: Omit<LocalDBSchema['verse_cards'], 'id' | 'created_at' | 'updated_at'>) {
+    async create(card: Omit<LocalDBSchema['verse_cards'], 'created_at' | 'updated_at'> & { id?: string }) {
       const now = new Date().toISOString();
       const cardData: LocalDBSchema['verse_cards'] = {
         ...card,
@@ -206,7 +206,7 @@ export const localDb = {
         current_phase: card.current_phase || 'daily',
         created_at: now,
         updated_at: now,
-        id: uuidv4()
+        id: card.id || uuidv4() // Use provided ID or generate new one
       };
 
       await db.verse_cards.add(cardData);
@@ -253,12 +253,12 @@ export const localDb = {
 
   // Review logs operations
   reviewLogs: {
-    async create(log: Omit<LocalDBSchema['review_logs'], 'id' | 'created_at'>) {
+    async create(log: Omit<LocalDBSchema['review_logs'], 'created_at'> & { id?: string }) {
       const now = new Date().toISOString();
       const logData: LocalDBSchema['review_logs'] = {
         ...log,
         created_at: now,
-        id: uuidv4()
+        id: log.id || uuidv4() // Use provided ID or generate new one
       };
 
       await db.review_logs.add(logData);
@@ -308,7 +308,8 @@ export const localDb = {
         .first();
     },
 
-    async create(profile: Omit<LocalDBSchema['user_profiles'], 'id' | 'created_at' | 'updated_at'>) {
+    async create(profile: Omit<LocalDBSchema['user_profiles'], 'created_at' | 'updated_at'> & { id?: string }) {
+      console.log('creating user profile');
       const now = new Date().toISOString();
       const profileData: LocalDBSchema['user_profiles'] = {
         ...profile,
@@ -317,7 +318,7 @@ export const localDb = {
         timezone: profile.timezone || 'UTC',
         created_at: now,
         updated_at: now,
-        id: uuidv4()
+        id: profile.id || uuidv4() // Use provided ID or generate new one
       };
 
       await db.user_profiles.add(profileData);

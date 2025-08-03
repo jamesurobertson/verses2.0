@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../../../hooks/useAuth';
+import { useAuth } from '../../../contexts/AuthContext';
 import { useTimezone } from '../../../contexts/TimezoneContext';
 import { localDb } from '../../../services/localDb';
 import { countDueCards } from '../../../utils/assignmentLogic';

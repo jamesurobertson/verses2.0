@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from "../contexts/AuthContext";
 import { MobileNavigation } from '../components/MobileNavigation/MobileNavigation';
 import { Review } from '../pages/Review/Review';
 import { Library } from '../pages/Library/Library';

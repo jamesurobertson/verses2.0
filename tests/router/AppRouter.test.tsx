@@ -2,10 +2,10 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRouter } from '../../src/router/AppRouter';
-import { useAuth } from '../../src/hooks/useAuth';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 // Mock the auth hook since we don't have it yet
-jest.mock('../../src/hooks/useAuth', () => ({
+jest.mock('../../src/contexts/AuthContext', () => ({
   useAuth: jest.fn(() => ({
     user: null,
     loading: false,

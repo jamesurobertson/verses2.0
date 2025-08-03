@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from "./AuthContext";
 import { localDb } from '../services/localDb';
 
 // Types for timezone calculations
@@ -103,7 +103,7 @@ export function TimezoneProvider({ children }: TimezoneProviderProps) {
     }
 
     loadUserTimezone();
-  }, [user]);
+  }, [user?.id]);
 
   // Calculate current date/time in user's timezone
   const userNow = new Date();

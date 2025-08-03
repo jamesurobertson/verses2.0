@@ -1,11 +1,12 @@
 /**
- * useAuth Hook
+ * Auth Provider
  * 
- * Simple authentication state management following Supabase patterns.
- * We trust Supabase's implementation and only test our business logic.
+ * Single source of truth for authentication state management.
+ * Provides authentication context throughout the app.
  */
 
-import { useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabaseClient } from '../services/supabase';
 
@@ -15,7 +16,15 @@ interface AuthState {
   isAuthenticated: boolean;
 }
 
-export function useAuth() {
+interface AuthContextValue extends AuthState {
+  signIn: (email: string, password: string) => Promise<any>;
+  signUp: (email: string, password: string, fullName?: string) => Promise<any>;
+  signOut: () => Promise<any>;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
     loading: true,
@@ -46,11 +55,11 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = (email: string, password: string) => {
+  const signIn = useCallback((email: string, password: string) => {
     return supabaseClient.auth.signInWithPassword({ email, password });
-  };
+  }, []);
 
-  const signUp = (email: string, password: string, fullName?: string) => {
+  const signUp = useCallback((email: string, password: string, fullName?: string) => {
     // Detect user's timezone automatically
     const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     
@@ -64,18 +73,32 @@ export function useAuth() {
         }
       }
     });
-  };
+  }, []);
 
-  const signOut = () => {
+  const signOut = useCallback(() => {
     return supabaseClient.auth.signOut();
-  };
+  }, []);
 
-  return {
+  const value = useMemo(() => ({
     user: state.user,
     loading: state.loading,
     isAuthenticated: state.isAuthenticated,
     signIn,
     signUp,
     signOut,
-  };
+  }), [state.user, state.loading, state.isAuthenticated, signIn, signUp, signOut]);
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }

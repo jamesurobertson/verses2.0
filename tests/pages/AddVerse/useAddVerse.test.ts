@@ -9,7 +9,7 @@ import '@testing-library/jest-dom';
 import { useAddVerse } from '../../../src/pages/AddVerse/hooks/useAddVerse';
 
 // Mock dependencies
-jest.mock('../../../src/hooks/useAuth', () => ({
+jest.mock('../../../src/contexts/AuthContext', () => ({
   useAuth: jest.fn(),
 }));
 
@@ -45,7 +45,7 @@ jest.mock('../../../src/utils/bibleRefParser', () => ({
 }));
 
 // Import mocked modules
-import { useAuth } from '../../../src/hooks/useAuth';
+import { useAuth } from '../../../src/contexts/AuthContext';
 import { dataService, DuplicateVerseError, ValidationError } from '../../../src/services/dataService';
 import { validateBibleReference, parseBibleReference } from '../../../src/utils/bibleRefParser';
 
