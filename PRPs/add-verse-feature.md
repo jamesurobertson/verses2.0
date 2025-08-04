@@ -59,35 +59,35 @@ User-visible behavior: A form where users enter Bible references (e.g., "John 3:
   why: API to get ESV verses, ensure it matches current code.
   critical: Successfully queries ESV API.
   
-- file: projects/verses2.0/src/services/esvApi.ts
+- file: projects/verses/src/services/esvApi.ts
   why: Existing API client pattern with caching, error handling, validation
   pattern: Singleton service, comprehensive error mapping, input sanitization
   
-- file: projects/verses2.0/src/services/supabase.ts
+- file: projects/verses/src/services/supabase.ts
   why: Database operations pattern, typed client, helper functions
   pattern: db.verses.findOrCreate, db.verseCards.create, error handling
   
-- file: projects/verses2.0/src/utils/bibleRefParser.ts
+- file: projects/verses/src/utils/bibleRefParser.ts
   why: Reference validation logic, comprehensive format support
   pattern: ParsedReference interface, validation errors, sanitization
   
-- file: projects/verses2.0/src/utils/sanitization.ts
+- file: projects/verses/src/utils/sanitization.ts
   why: Input validation using Zod schemas, XSS protection
   pattern: bibleReferenceSchema with transform and refine
   
-- file: projects/verses2.0/src/hooks/useVerses.ts
+- file: projects/verses/src/hooks/useVerses.ts
   why: Data management hook pattern, loading states, error handling
   pattern: useState for state, useEffect for data loading, clear error messages
   
-- file: projects/verses2.0/src/components/Button/Button.tsx
+- file: projects/verses/src/components/Button/Button.tsx
   why: Component pattern with TypeScript, variants, props interface
   pattern: Props interface, variants, className combination, testid support
   
-- file: projects/verses2.0/database/migrations/000_complete_reset.sql
+- file: projects/verses/database/migrations/000_complete_reset.sql
   why: Exact database schema with UUIDs, constraints, triggers
   critical: Dexie schema must match this exactly for sync consistency
   
-- file: projects/verses2.0/src/types/verse.ts
+- file: projects/verses/src/types/verse.ts
   why: Type definitions for Verse, VerseCardData interfaces
   pattern: Consistent naming, proper typing, interface composition
 ```

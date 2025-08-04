@@ -35,6 +35,7 @@ interface UseReviewReturn {
     correctCount: number;
     incorrectCount: number;
   };
+  referenceDisplayMode: string;
   startReview: () => void;
   startTodaysReview: () => void;
   startIncorrectReview: () => void;
@@ -52,6 +53,7 @@ export function useReview(): UseReviewReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<ReviewSession | null>(null);
+  const [referenceDisplayMode, setReferenceDisplayMode] = useState<string>('');
 
   /**
    * Loads cards that were reviewed today
@@ -94,46 +96,6 @@ export function useReview(): UseReviewReturn {
     }
   }, []);
 
-  /**
-   * Loads all user cards from local database
-   */
-  const loadAllCards = useCallback(async (userId: string): Promise<LibraryVerseCard[]> => {
-    try {
-      const localUserCards = await localDb.verseCards.getByUser(userId);
-      const libraryCards: LibraryVerseCard[] = [];
-
-      for (const card of localUserCards) {
-        // Get verse data
-        const verse = await localDb.verses.findById(card.verse_id);
-        if (verse) {
-          libraryCards.push({
-            id: card.id!,
-            verse: {
-              id: verse.id!,
-              reference: verse.reference,
-              text: verse.text,
-              translation: verse.translation
-            },
-            currentPhase: card.current_phase,
-            nextDueDate: card.next_due_date,
-            assignedDayOfWeek: card.assigned_day_of_week,
-            assignedWeekParity: card.assigned_week_parity,
-            assignedDayOfMonth: card.assigned_day_of_month,
-            currentStreak: card.current_streak,
-            bestStreak: card.best_streak,
-            lastReviewedAt: card.last_reviewed_at,
-            archived: card.archived,
-            source: 'local'
-          });
-        }
-      }
-
-      return libraryCards;
-    } catch (error) {
-      console.error('Failed to load all cards:', error);
-      return [];
-    }
-  }, []);
 
   /**
    * Loads due cards from local database using assignment-aware logic
@@ -170,7 +132,8 @@ export function useReview(): UseReviewReturn {
       }
 
       // Filter cards using assignment logic instead of simple date comparison
-      return filterDueCards(libraryCards, timezone) as LibraryVerseCard[];
+      const dueCards = filterDueCards(libraryCards, timezone);
+      return dueCards.filter(card => 'verse' in card) as LibraryVerseCard[];
     } catch (error) {
       console.error('Failed to load due cards:', error);
       return [];
@@ -354,9 +317,19 @@ export function useReview(): UseReviewReturn {
     setSession(null);
   }, [session]);
 
+  const loadReferenceDisplayMode = useCallback(async (userId: string) => {
+    const userProfile = await localDb.userProfiles.findByUserId(userId);
+    if (userProfile) {
+      setReferenceDisplayMode(userProfile.reference_display_mode);
+    }
+  }, []);
+
   // Load due cards when user changes
   useEffect(() => {
     refreshDueCards();
+    if (user) {
+      loadReferenceDisplayMode(user.id);
+    }
   }, [refreshDueCards]);
 
   // Calculate derived values
@@ -382,6 +355,7 @@ export function useReview(): UseReviewReturn {
     sessionActive,
     currentCard,
     sessionProgress,
+    referenceDisplayMode,
     startReview,
     startTodaysReview,
     startIncorrectReview,

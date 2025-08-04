@@ -21,6 +21,7 @@ export const Button: React.FC<ButtonProps> = ({
   className = '',
   type = 'button',
   'data-testid': testId,
+  ...rest
 }) => {
   const styles = buttonStyles({ variant, size, disabled });
   const combinedClassName = `${styles} ${className}`.trim();
@@ -32,6 +33,7 @@ export const Button: React.FC<ButtonProps> = ({
       onClick={onClick}
       className={combinedClassName}
       data-testid={testId}
+      {...rest}
     >
       {children}
     </button>

@@ -47,7 +47,7 @@ export function AddVerse() {
   };
 
   // Handle removing a verse (archive it)
-  const handleRemoveVerse = async (verseCardId: number) => {
+  const handleRemoveVerse = async (verseCardId: string) => {
     // TODO: Implement removeVerse in dataService or localDb
     // For now, just log and refresh
     console.log('Removing verse card:', verseCardId);

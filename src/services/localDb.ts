@@ -18,11 +18,17 @@ export interface LocalDBSchema {
   verses: {
     id?: string;          // UUID string primary key
     reference: string;    // "John 3:16" (canonical ESV format)
-    aliases: string[];    // ["jn 3:16", "john 3:16", "jhn 3:16"] (normalized user inputs)
     text: string;         // ESV verse text
     translation: string;  // "ESV"
     created_at: string;   // ISO timestamp
     updated_at: string;   // ISO timestamp
+  };
+
+  aliases: {
+    id?: string;          // UUID string primary key
+    alias: string;        // "jn 3:16" (normalized user input)
+    verse_id: string;     // Foreign key to verses
+    created_at: string;   // ISO timestamp
   };
 
   verse_cards: {
@@ -59,17 +65,19 @@ export interface LocalDBSchema {
 const db = new Dexie('VersesDB') as Dexie & {
   user_profiles: EntityTable<LocalDBSchema['user_profiles'], 'id'>;
   verses: EntityTable<LocalDBSchema['verses'], 'id'>;
+  aliases: EntityTable<LocalDBSchema['aliases'], 'id'>;
   verse_cards: EntityTable<LocalDBSchema['verse_cards'], 'id'>;
   review_logs: EntityTable<LocalDBSchema['review_logs'], 'id'>;
 };
 
 
-// Version 10: Convert to UUID string primary keys
-db.version(10).stores({
+// Version 11: Remove aliases array, add aliases table
+db.version(11).stores({
   // UUID string primary keys instead of auto-increment
   user_profiles: 'id, user_id, timezone, [user_id]',
   verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
-  verses: 'id, reference, translation, *aliases, [reference+translation]',
+  verses: 'id, reference, translation, [reference+translation]',
+  aliases: 'id, alias, verse_id, [alias], [verse_id]',
   review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]'
 })
 
@@ -80,7 +88,12 @@ db.verses.hook('creating', function (_primKey, obj, _trans) {
   obj.created_at = now;
   obj.updated_at = now;
   obj.translation = obj.translation || 'ESV';
-  obj.aliases = obj.aliases || [];
+});
+
+db.aliases.hook('creating', function (_primKey, obj, _trans) {
+  const now = new Date().toISOString();
+  obj.id = obj.id || uuidv4();
+  obj.created_at = now;
 });
 
 db.verses.hook('updating', function (modifications, _primKey, _obj, _trans) {
@@ -152,15 +165,14 @@ export const localDb = {
         .first();
     },
 
-    async create(verse: Omit<LocalDBSchema['verses'], 'created_at' | 'updated_at'> & { id?: string; translation?: string; aliases?: string[] }) {
+    async create(verse: Omit<LocalDBSchema['verses'], 'id' | 'created_at' | 'updated_at'> & { translation?: string }) {
       const now = new Date().toISOString();
       const verseData: LocalDBSchema['verses'] = {
         ...verse,
         translation: verse.translation || 'ESV',
-        aliases: verse.aliases || [],
         created_at: now,
         updated_at: now,
-        id: verse.id || uuidv4() // Use provided ID or generate new one
+        id: uuidv4() // Always generate locally
       };
 
       await db.verses.add(verseData);
@@ -170,19 +182,54 @@ export const localDb = {
       return createdVerse!;
     },
 
-    async findByAlias(alias: string) {
-      // Search for verses that have this alias in their aliases array
-      return db.verses
-        .filter(verse => verse.aliases && verse.aliases.includes(alias))
-        .first();
-    },
-
     async getAll() {
       return db.verses.orderBy('created_at').reverse().toArray();
     },
 
     async findById(id: string) {
       return db.verses.get(id);
+    }
+  },
+
+  // Aliases operations
+  aliases: {
+    async findByAlias(alias: string) {
+      return db.aliases
+        .where('alias')
+        .equals(alias)
+        .first();
+    },
+
+    async findVerseByAlias(alias: string) {
+      const aliasRecord = await this.findByAlias(alias);
+      if (!aliasRecord) return null;
+      return db.verses.get(aliasRecord.verse_id);
+    },
+
+    async create(alias: Omit<LocalDBSchema['aliases'], 'id' | 'created_at'>) {
+      const now = new Date().toISOString();
+      const aliasData: LocalDBSchema['aliases'] = {
+        ...alias,
+        created_at: now,
+        id: uuidv4()
+      };
+
+      await db.aliases.add(aliasData);
+      return aliasData;
+    },
+
+    async getByVerseId(verseId: string) {
+      return db.aliases
+        .where('verse_id')
+        .equals(verseId)
+        .toArray();
+    },
+
+    async deleteByVerseId(verseId: string) {
+      return db.aliases
+        .where('verse_id')
+        .equals(verseId)
+        .delete();
     }
   },
 
@@ -195,7 +242,7 @@ export const localDb = {
         .first();
     },
 
-    async create(card: Omit<LocalDBSchema['verse_cards'], 'created_at' | 'updated_at'> & { id?: string }) {
+    async create(card: Omit<LocalDBSchema['verse_cards'], 'id' | 'created_at' | 'updated_at'>) {
       const now = new Date().toISOString();
       const cardData: LocalDBSchema['verse_cards'] = {
         ...card,
@@ -206,7 +253,7 @@ export const localDb = {
         current_phase: card.current_phase || 'daily',
         created_at: now,
         updated_at: now,
-        id: card.id || uuidv4() // Use provided ID or generate new one
+        id: uuidv4() // Always generate locally
       };
 
       await db.verse_cards.add(cardData);
@@ -244,7 +291,7 @@ export const localDb = {
         .equals(userId)
         .filter(card => {
           return !card.archived &&
-            card.last_reviewed_at &&
+            !!card.last_reviewed_at &&
             card.last_reviewed_at.split('T')[0] === today;
         })
         .toArray();
@@ -253,12 +300,12 @@ export const localDb = {
 
   // Review logs operations
   reviewLogs: {
-    async create(log: Omit<LocalDBSchema['review_logs'], 'created_at'> & { id?: string }) {
+    async create(log: Omit<LocalDBSchema['review_logs'], 'id' | 'created_at'>) {
       const now = new Date().toISOString();
       const logData: LocalDBSchema['review_logs'] = {
         ...log,
         created_at: now,
-        id: log.id || uuidv4() // Use provided ID or generate new one
+        id: uuidv4() // Always generate locally
       };
 
       await db.review_logs.add(logData);
@@ -308,7 +355,7 @@ export const localDb = {
         .first();
     },
 
-    async create(profile: Omit<LocalDBSchema['user_profiles'], 'created_at' | 'updated_at'> & { id?: string }) {
+    async create(profile: Omit<LocalDBSchema['user_profiles'], 'id' | 'created_at' | 'updated_at'>) {
       console.log('creating user profile');
       const now = new Date().toISOString();
       const profileData: LocalDBSchema['user_profiles'] = {
@@ -318,7 +365,7 @@ export const localDb = {
         timezone: profile.timezone || 'UTC',
         created_at: now,
         updated_at: now,
-        id: profile.id || uuidv4() // Use provided ID or generate new one
+        id: uuidv4() // Always generate locally
       };
 
       await db.user_profiles.add(profileData);
@@ -350,9 +397,10 @@ export const localDb = {
 
   // Utility functions
   async clear() {
-    await db.transaction('rw', db.user_profiles, db.verses, db.verse_cards, db.review_logs, async () => {
+    await db.transaction('rw', [db.user_profiles, db.verses, db.aliases, db.verse_cards, db.review_logs], async () => {
       await db.user_profiles.clear();
       await db.verses.clear();
+      await db.aliases.clear();
       await db.verse_cards.clear();
       await db.review_logs.clear();
     });

@@ -1,158 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-// Database type definitions (will be generated from Supabase later)
-export interface Database {
-  public: {
-    Tables: {
-      user_profiles: {
-        Row: {
-          id: string;
-          user_id: string;
-          email: string | null;
-          full_name: string | null;
-          timezone: string;
-          preferred_translation: string;
-          reference_display_mode: 'full' | 'first' | 'blank';
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          email?: string | null;
-          full_name?: string | null;
-          timezone?: string;
-          preferred_translation?: string;
-          reference_display_mode?: 'full' | 'first' | 'blank';
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          email?: string | null;
-          full_name?: string | null;
-          timezone?: string;
-          preferred_translation?: string;
-          reference_display_mode?: 'full' | 'first' | 'blank';
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      verses: {
-        Row: {
-          id: string;
-          reference: string;
-          text: string;
-          translation: string;
-          aliases: string[];
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          reference: string;
-          text: string;
-          translation?: string;
-          aliases?: string[];
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          reference?: string;
-          text?: string;
-          translation?: string;
-          aliases?: string[];
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      verse_cards: {
-        Row: {
-          id: string;
-          user_id: string;
-          verse_id: string;
-          current_phase: 'daily' | 'weekly' | 'biweekly' | 'monthly';
-          phase_progress_count: number;
-          last_reviewed_at: string | null;
-          next_due_date: string;
-          assigned_day_of_week: number | null;
-          assigned_week_parity: number | null;
-          assigned_day_of_month: number | null;
-          archived: boolean;
-          current_streak: number;
-          best_streak: number;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          verse_id: string;
-          current_phase?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
-          phase_progress_count?: number;
-          last_reviewed_at?: string | null;
-          next_due_date: string;
-          assigned_day_of_week?: number | null;
-          assigned_week_parity?: number | null;
-          assigned_day_of_month?: number | null;
-          archived?: boolean;
-          current_streak?: number;
-          best_streak?: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          verse_id?: string;
-          current_phase?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
-          phase_progress_count?: number;
-          last_reviewed_at?: string | null;
-          next_due_date?: string;
-          assigned_day_of_week?: number | null;
-          assigned_week_parity?: number | null;
-          assigned_day_of_month?: number | null;
-          archived?: boolean;
-          current_streak?: number;
-          best_streak?: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      review_logs: {
-        Row: {
-          id: string;
-          user_id: string;
-          verse_card_id: string;
-          was_successful: boolean;
-          counted_toward_progress: boolean;
-          review_time_seconds: number | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          verse_card_id: string;
-          was_successful: boolean;
-          counted_toward_progress: boolean;
-          review_time_seconds?: number | null;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          verse_card_id?: string;
-          was_successful?: boolean;
-          counted_toward_progress?: boolean;
-          review_time_seconds?: number | null;
-          created_at?: string;
-        };
-      };
-    };
-  };
-}
+import type { Database } from '../types/database';
 
 // Typed Supabase client
 export type TypedSupabaseClient = SupabaseClient<Database>;
@@ -175,10 +22,10 @@ export function createSupabaseClient(): TypedSupabaseClient {
       autoRefreshToken: true,
       detectSessionInUrl: true,
     },
-    // Configure realtime (can be disabled for better performance if not needed)
+    // Disable realtime for better performance - this is a single-user study app
     realtime: {
       params: {
-        eventsPerSecond: 10,
+        eventsPerSecond: 0, // Disable realtime subscriptions
       },
     },
   });
@@ -186,17 +33,6 @@ export function createSupabaseClient(): TypedSupabaseClient {
 
 // Export singleton client instance
 export const supabaseClient = createSupabaseClient();
-// Helper types for common operations
-export type UserProfile = {
-  id: string;
-  email: string;
-  created_at: string;
-};
-
-export type AuthResponse = {
-  user: UserProfile | null;
-  error: Error | null;
-};
 
 // Helper functions for common database operations
 export const db = {
@@ -206,7 +42,7 @@ export const db = {
       return supabaseClient
         .from('user_profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('user_id', userId) // Use user_id, not id
         .single();
     },
 
@@ -214,7 +50,7 @@ export const db = {
       return supabaseClient
         .from('user_profiles')
         .update(updates)
-        .eq('id', userId)
+        .eq('user_id', userId) // Use user_id, not id
         .select()
         .single();
     },
@@ -223,24 +59,12 @@ export const db = {
   // Verses operations (shared cache)
   verses: {
     async getByReference(reference: string, translation: string = 'ESV') {
-      console.log('Supabase getByReference:', { reference, translation });
-
-      // Check auth status
-      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session:', {
-        hasSession: !!session,
-        sessionError,
-        userId: session?.user?.id
-      });
-
-      const result = await supabaseClient
+      return supabaseClient
         .from('verses')
-        .select('*')
+        .select('id, reference, text, translation, created_at, updated_at')
         .eq('reference', reference)
         .eq('translation', translation)
-        .maybeSingle(); // Use maybeSingle() instead of single() to handle 0 results gracefully
-      console.log('Supabase getByReference result:', result);
-      return result;
+        .maybeSingle();
     },
 
     async getById(id: string) {
@@ -248,33 +72,22 @@ export const db = {
         .from('verses')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
     },
 
     async create(verse: Database['public']['Tables']['verses']['Insert']) {
-      console.log('Supabase create verse:', verse);
-
-      // Check auth status
-      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session for create:', {
-        hasSession: !!session,
-        sessionError,
-        userId: session?.user?.id
-      });
-
-      const result = await supabaseClient
+      return supabaseClient
         .from('verses')
         .insert(verse)
-        .select()
+        .select('id, reference, text, translation, created_at, updated_at')
         .single();
-      console.log('Supabase create verse result:', result);
-      return result;
     },
 
     async findOrCreate(reference: string, text: string, translation: string = 'ESV') {
       // First try to find existing verse
       const existing = await this.getByReference(reference, translation);
       if (existing.data) {
+
         return existing;
       }
 
@@ -327,32 +140,29 @@ export const db = {
         .order('next_due_date', { ascending: true });
     },
 
+    async getByUserAndVerse(userId: string, verseId: string) {
+      return supabaseClient
+        .from('verse_cards')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('verse_id', verseId)
+        .maybeSingle();
+    },
+
     async create(card: Database['public']['Tables']['verse_cards']['Insert']) {
-      console.log('Supabase create verse card:', card);
-
-      // Check auth status
-      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log('Auth session for card create:', {
-        hasSession: !!session,
-        sessionError,
-        userId: session?.user?.id
-      });
-
-      const result = await supabaseClient
+      return supabaseClient
         .from('verse_cards')
         .insert(card)
         .select()
         .single();
-      console.log('Supabase create verse card result:', result);
-      if (result.error) {
-        console.error('Verse card creation error details:', {
-          code: result.error.code,
-          message: result.error.message,
-          details: result.error.details,
-          hint: result.error.hint
-        });
+    },
+
+    async findOrCreate(card: Database['public']['Tables']['verse_cards']['Insert']) {
+      const existing = await this.getByUserAndVerse(card.user_id, card.verse_id);
+      if (existing.data) {
+        return {...existing, statusText: "found"};
       }
-      return result;
+      return this.create(card);
     },
 
     async update(id: string, updates: Database['public']['Tables']['verse_cards']['Update'], userId: string) {
@@ -435,24 +245,37 @@ export const db = {
         .order('created_at', { ascending: false });
     },
   },
-};
 
-// Row Level Security (RLS) helper functions
-export const rls = {
-  /**
-   * Enables RLS on a table (requires admin privileges).
-   * This would typically be run in a migration script.
-   */
-  async enableRLS(tableName: string) {
-    return supabaseClient.rpc('enable_rls', { table_name: tableName });
+  // Aliases operations
+  aliases: {
+    async getByAlias(alias: string) {
+      return supabaseClient
+        .from('aliases')
+        .select('verse_id, verses!inner(*)')
+        .eq('alias', alias) 
+        .maybeSingle();
+    },
+
+    async create(alias: string, verseId: string) {
+      return supabaseClient
+        .from('aliases')
+        .insert({
+          alias: alias,
+          verse_id: verseId
+        })
+        .select()
+        .single();
+    },
   },
 
-  /**
-   * Creates RLS policies for user data isolation.
-   * This would typically be run in a migration script.
-   */
-  async createUserPolicies(tableName: string) {
-    // This is a placeholder - actual RLS policies are created via SQL migrations
-    console.warn(`RLS policies for ${tableName} should be created via SQL migrations`);
+  // RPC functions
+  rpc: {
+    async verseLookup(reference: string, normalizedRef: string, userId?: string) {
+      return supabaseClient.rpc('rpc_verse_lookup', {
+        p_reference: reference,
+        p_normalized: normalizedRef,
+        p_user_id: userId || undefined
+      });
+    },
   },
 };

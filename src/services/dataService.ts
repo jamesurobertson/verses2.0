@@ -1,8 +1,6 @@
-import { localDb, db, type LocalDBSchema } from './localDb';
-import { supabaseClient } from './supabase';
-import { esvApi } from './esvApi';
+import { db, type LocalDBSchema } from './localDb';
+import { supabaseClient, db as supabaseDb } from './supabase';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
-// import { processReview, type ReviewPhase } from '../utils/spacedRepetition';
 import { getTodayString } from '../utils/dateUtils';
 
 // Dual-write operation result interface
@@ -44,15 +42,121 @@ export class ValidationError extends Error {
   }
 }
 
+// Secure verse operations using edge functions
+async function secureVerseOperation(operation: 'lookup' | 'create', reference: string, normalizedRef: string, accessToken?: string): Promise<{
+  verse: any | null;
+  foundViaAlias: boolean;
+  existingCard?: any | null;
+  source?: string;
+}> {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    
+    // Use provided access token or get from session
+    let token = accessToken;
+    if (!token) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('User not authenticated');
+      }
+      token = session.access_token;
+    }
+    
+    const requestBody = {
+      operation,
+      reference,
+      normalizedRef,
+      translation: 'ESV'
+      // NO userId in body - extracted from JWT token in edge function
+      // NO userToken in body - security best practice
+    };
+    
+    console.log('🚀 Sending request to verse-operations:', {
+      operation,
+      reference,
+      hasToken: !!token
+    });
+    
+    // Add timeout for better performance
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` // Token only in header - secure
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Verse operation failed');
+      }
+      
+      const data = await response.json();
+      return {
+        verse: data.verse,
+        foundViaAlias: data.foundViaAlias,
+        existingCard: data.userCard,
+        source: data.source
+      };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('Secure verse operation error:', error);
+    throw error;
+  }
+}
+
+// Cache for recent lookups to avoid duplicate edge function calls within the same session
+const lookupCache = new Map<string, { data: any; timestamp: number }>(); 
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes - verses don't change
+
+async function cachedVerseOperation(operation: 'lookup' | 'create', reference: string, normalizedRef: string, accessToken?: string) {
+  // Cache key now based on token (user is extracted from token in edge function)
+  const tokenHash = accessToken ? accessToken.substring(0, 8) : 'anon';
+  const cacheKey = `${operation}:${reference}:${normalizedRef}:${tokenHash}`;
+  const cached = lookupCache.get(cacheKey);
+  
+  // Only cache lookups, not creates
+  if (operation === 'lookup' && cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    return cached.data;
+  }
+  
+  const result = await secureVerseOperation(operation, reference, normalizedRef, accessToken);
+  
+  // Only cache lookups
+  if (operation === 'lookup') {
+    lookupCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  }
+  
+  return result;
+}
 
 // Unified data service for dual-write operations
 export const dataService = {
   /**
-   * Adds a new verse with alias-based lookup and dual-write strategy
+   * Adds a new verse with optimized 3-step flow:
+   * 1. Check local database (verses + aliases table)
+   * 2. Check remote database (Supabase verses + aliases)  
+   * 3. ESV API as last resort
+   * ✅ NO async calls inside transactions (follows Dexie best practices)
    */
   async addVerse(
     reference: string,
-    userId: string
+    userId: string,
+    accessToken?: string
   ): Promise<
     DualWriteResult<{
       verse: LocalDBSchema['verses'];
@@ -68,169 +172,145 @@ export const dataService = {
       errors: {},
       success: false
     };
-  
+
     const normalizedInput = normalizeReferenceForLookup(reference);
     const nextDueDate = getTodayString();
-  
-    let existingVerse: LocalDBSchema['verses'] | undefined =
-      await localDb.verses.findByAlias(normalizedInput);
-  
-    let esvCanonicalRef: string | null = null;
-    let esvVerseText: string | null = null;
-  
+
     try {
-      // If we don't have it by alias, do ESV lookup up front to get canonical and text
-      if (!existingVerse) {
-        const esvResponse = await esvApi.getPassage(reference);
-        if (!esvResponse.passages || esvResponse.passages.length === 0) {
-          throw new ValidationError('No verse text found for this reference');
+      // STEP 1: Check Local Database (verses + aliases)
+      // First check direct reference match
+      let localVerse = await db.verses
+        .where('[reference+translation]')
+        .equals([reference, 'ESV'])
+        .first();
+
+      // If not found by reference, check aliases table
+      if (!localVerse) {
+        const aliasRecord = await db.aliases
+          .where('alias')
+          .equals(normalizedInput)
+          .first();
+        
+        if (aliasRecord) {
+          localVerse = await db.verses.get(aliasRecord.verse_id);
         }
-        esvCanonicalRef = esvResponse.canonical;
-        esvVerseText = esvResponse.passages[0].trim();
-  
-        // Try to resolve by canonical reference locally
-        existingVerse = await localDb.verses.findByReference(esvCanonicalRef);
       }
-  
-      // Local transaction: dedupe, create verse if needed, create verse card
-      await db.transaction('rw', db.verses, db.verse_cards, async () => {
-        // Re-check alias to avoid race
-        if (!existingVerse) {
-          existingVerse = await localDb.verses.findByAlias(normalizedInput);
-        }
-  
-        if (existingVerse) {
-          // Ensure user doesn't already have a card
-          const existingCard = await localDb.verseCards.findByUserAndVerse(
-            userId,
-            existingVerse.id!
-          );
-          if (existingCard) {
-            throw new DuplicateVerseError(existingVerse.reference, {
-              verse: existingVerse,
+
+      // If verse found locally, check user's verse_cards
+      if (localVerse) {
+        const existingCard = await db.verse_cards
+          .where('[user_id+verse_id]')
+          .equals([userId, localVerse.id!])
+          .first();
+
+        if (existingCard) {
+          if (existingCard.archived) {
+            // Unarchive and reset as fresh verse_card
+            await db.transaction('rw', db.verse_cards, async (tx) => {
+              await tx.verse_cards.update(existingCard.id!, {
+                archived: false,
+                current_phase: 'daily',
+                phase_progress_count: 0,
+                current_streak: 0,
+                next_due_date: nextDueDate,
+                assigned_day_of_week: null,
+                assigned_week_parity: null,
+                assigned_day_of_month: null,
+                updated_at: new Date().toISOString()
+              });
+            });
+            
+            const restoredCard = await db.verse_cards.get(existingCard.id!);
+            result.local = { verse: localVerse, verseCard: restoredCard! };
+            result.success = true;
+            return result;
+          } else {
+            // Active card - throw duplicate error
+            throw new DuplicateVerseError(localVerse.reference, {
+              verse: localVerse,
               verseCard: existingCard
             });
           }
-        } else if (esvCanonicalRef && esvVerseText !== null) {
-          // Try again by canonical reference for safety
-          existingVerse = await localDb.verses.findByReference(esvCanonicalRef);
-          if (existingVerse) {
-            // Attach alias if missing
-            const currentAliases = existingVerse.aliases || [];
-            if (!currentAliases.includes(normalizedInput)) {
-              await db.verses.update(existingVerse.id!, {
-                aliases: [...currentAliases, normalizedInput]
-              });
-              existingVerse.aliases = [...currentAliases, normalizedInput];
-            }
-  
-            const existingCard = await localDb.verseCards.findByUserAndVerse(
-              userId,
-              existingVerse.id!
-            );
-            if (existingCard) {
-              throw new DuplicateVerseError(esvCanonicalRef, {
-                verse: existingVerse,
-                verseCard: existingCard
-              });
-            }
-          } else {
-            // Create completely new verse
-            existingVerse = await localDb.verses.create({
-              reference: esvCanonicalRef,
-              text: esvVerseText,
-              translation: 'ESV',
-              aliases: [normalizedInput]
+        }
+
+        // User doesn't have this verse - add alias if needed and create verse_card
+        const existingAlias = await db.aliases
+          .where('alias')
+          .equals(normalizedInput)
+          .first();
+
+        if (!existingAlias) {
+          // Add new alias in transaction
+          await db.transaction('rw', db.aliases, async (tx) => {
+            await tx.aliases.add({
+              id: crypto.randomUUID(),
+              alias: normalizedInput,
+              verse_id: localVerse!.id!,
+              created_at: new Date().toISOString()
             });
-          }
-        } else {
-          // Shouldn't happen: no alias and no ESV data
-          throw new ValidationError('Unable to resolve verse reference');
+          });
         }
-  
-        // At this point we have a verse and confirmed no duplicate card for this user
-        const localVerseCard = await localDb.verseCards.create({
-          user_id: userId,
-          verse_id: existingVerse.id!,
-          current_phase: 'daily',
-          phase_progress_count: 0,
-          last_reviewed_at: null,
-          next_due_date: nextDueDate,
-          assigned_day_of_week: null,
-          assigned_week_parity: null,
-          assigned_day_of_month: null,
-          archived: false,
-          current_streak: 0,
-          best_streak: 0
+
+        // Create verse_card in transaction
+        await db.transaction('rw', db.verse_cards, async (tx) => {
+          const now = new Date().toISOString();
+          const cardData: LocalDBSchema['verse_cards'] = {
+            id: crypto.randomUUID(),
+            user_id: userId,
+            verse_id: localVerse!.id!,
+            current_phase: 'daily',
+            phase_progress_count: 0,
+            last_reviewed_at: null,
+            next_due_date: nextDueDate,
+            assigned_day_of_week: null,
+            assigned_week_parity: null,
+            assigned_day_of_month: null,
+            archived: false,
+            current_streak: 0,
+            best_streak: 0,
+            created_at: now,
+            updated_at: now
+          };
+          await tx.verse_cards.add(cardData);
+          result.local = { verse: localVerse!, verseCard: cardData };
         });
-  
-        result.local = {
-          verse: existingVerse,
-          verseCard: localVerseCard
-        };
-      });
-  
-      // Remote sync (outside transaction)
-      try {
-        // Ensure verse exists remotely (by shared UUID)
-        const { data: existingRemoteVerse, error: fetchVerseError } =
-          await supabaseClient
-            .from('verses')
-            .select('*')
-            .eq('id', result.local!.verse.id)
-            .single();
-  
-        if (fetchVerseError && fetchVerseError.code !== 'PGRST116') {
-          // PGRST116 is "no rows" in Supabase-land; proceed to insert if not found
-          // but treat other errors as fatal for remote sync
-          throw fetchVerseError;
-        }
-  
-        if (!existingRemoteVerse) {
-          const { error: insertVerseError } = await supabaseClient
-            .from('verses')
-            .insert({
-              id: result.local!.verse.id,
-              reference: result.local!.verse.reference,
-              text: result.local!.verse.text,
-              translation: result.local!.verse.translation,
-              aliases: result.local!.verse.aliases
-            });
-  
-          if (insertVerseError) {
-            throw insertVerseError;
-          }
-        }
-  
-        // Insert remote verse card with same UUID (ignore duplicate remote errors gracefully)
-        const { error: cardError } = await supabaseClient.from('verse_cards').insert({
-          id: result.local!.verseCard.id,
-          user_id: result.local!.verseCard.user_id,
-          verse_id: result.local!.verseCard.verse_id,
-          current_phase: result.local!.verseCard.current_phase,
-          phase_progress_count: result.local!.verseCard.phase_progress_count,
-          last_reviewed_at: result.local!.verseCard.last_reviewed_at,
-          next_due_date: result.local!.verseCard.next_due_date,
-          assigned_day_of_week: result.local!.verseCard.assigned_day_of_week,
-          assigned_week_parity: result.local!.verseCard.assigned_week_parity,
-          assigned_day_of_month: result.local!.verseCard.assigned_day_of_month,
-          archived: result.local!.verseCard.archived,
-          current_streak: result.local!.verseCard.current_streak,
-          best_streak: result.local!.verseCard.best_streak
-        });
-  
-        if (cardError) {
-          throw cardError;
-        }
-      } catch (err) {
-        result.errors.remote = new NetworkError(
-          'Failed to sync to remote database - data saved locally',
-          err as Error
-        );
+
+        // Sync to remote (outside transaction)
+        await this.syncVerseToRemote(result.local!.verse, result.local!.verseCard, result);
+        result.success = true;
+        return result;
       }
-  
-      result.success = true;
-      return result;
+
+      // STEP 2: Check Remote Database via Secure Edge Function
+      const { verse: foundRemoteVerse, existingCard } = await cachedVerseOperation('create', reference, normalizedInput, accessToken);
+
+      if (foundRemoteVerse) {
+        // We already have the user's card info from the optimized lookup
+        if (existingCard) {
+          if (existingCard.archived) {
+            // Handle archived card unarchiving
+            throw new DuplicateVerseError(foundRemoteVerse.reference, {
+              verse: foundRemoteVerse,
+              verseCard: existingCard
+            });
+          } else {
+            // Active card exists
+            throw new DuplicateVerseError(foundRemoteVerse.reference, {
+              verse: foundRemoteVerse,
+              verseCard: existingCard
+            });
+          }
+        }
+
+        // No existing card for user - sync remote to local and create verse_card
+        await this.syncRemoteVerseToLocal(foundRemoteVerse, normalizedInput, userId, nextDueDate, result);
+        result.success = true;
+        return result;
+      }
+
+      // STEP 3: This should not happen - edge function handles ESV API calls
+      // If we reach here, there was an error in the edge function flow
+      throw new ValidationError('Unable to process verse - please try again');
     } catch (error) {
       if (error instanceof DuplicateVerseError || error instanceof ValidationError) {
         throw error;
@@ -242,8 +322,268 @@ export const dataService = {
     }
   },
 
+  // Helper methods for addVerse
+  async syncVerseToRemote(verse: LocalDBSchema['verses'], verseCard: LocalDBSchema['verse_cards'], result: any) {
+    try {
+      // Verse creation is now handled by secure edge functions
+      // Just create the verse card since verse should already exist remotely
+      const { error: cardError } = await supabaseDb.verseCards.create({
+        user_id: verseCard.user_id,
+        verse_id: verse.id!, // Use local verse ID - should match remote due to edge function
+        current_phase: verseCard.current_phase,
+        phase_progress_count: verseCard.phase_progress_count,
+        last_reviewed_at: verseCard.last_reviewed_at,
+        next_due_date: verseCard.next_due_date,
+        assigned_day_of_week: verseCard.assigned_day_of_week,
+        assigned_week_parity: verseCard.assigned_week_parity,
+        assigned_day_of_month: verseCard.assigned_day_of_month,
+        archived: verseCard.archived,
+        current_streak: verseCard.current_streak,
+        best_streak: verseCard.best_streak
+      });
+
+      if (cardError) throw cardError;
+    } catch (err) {
+      result.errors.remote = new NetworkError(
+        'Failed to sync to remote database - data saved locally',
+        err as Error
+      );
+    }
+  },
+
+  async syncRemoteVerseToLocal(remoteVerse: any, alias: string, userId: string, nextDueDate: string, result: any) {
+    // Create verse locally in transaction
+    await db.transaction('rw', db.verses, db.aliases, db.verse_cards, async (tx) => {
+      const now = new Date().toISOString();
+      
+      // Create verse with same ID as remote (maintained by edge functions)
+      const localVerseData: LocalDBSchema['verses'] = {
+        id: remoteVerse.id, // Use remote ID for consistency
+        reference: remoteVerse.reference,
+        text: remoteVerse.text,
+        translation: remoteVerse.translation,
+        created_at: remoteVerse.created_at || now,
+        updated_at: remoteVerse.updated_at || now
+      };
+      await tx.verses.add(localVerseData);
+
+      // Create alias if it doesn't exist locally
+      const existingAlias = await tx.aliases.where('alias').equals(alias).first();
+      if (!existingAlias) {
+        await tx.aliases.add({
+          id: crypto.randomUUID(),
+          alias: alias,
+          verse_id: localVerseData.id!,
+          created_at: now
+        });
+      }
+
+      // Create verse_card
+      const cardData: LocalDBSchema['verse_cards'] = {
+        id: crypto.randomUUID(),
+        user_id: userId,
+        verse_id: localVerseData.id!,
+        current_phase: 'daily',
+        phase_progress_count: 0,
+        last_reviewed_at: null,
+        next_due_date: nextDueDate,
+        assigned_day_of_week: null,
+        assigned_week_parity: null,
+        assigned_day_of_month: null,
+        archived: false,
+        current_streak: 0,
+        best_streak: 0,
+        created_at: now,
+        updated_at: now
+      };
+      await tx.verse_cards.add(cardData);
+
+      result.local = { verse: localVerseData, verseCard: cardData };
+    });
+  },
+
+  async addAliasAndCreateCard(verse: any, alias: string, userId: string, nextDueDate: string, result: any) {
+    await db.transaction('rw', db.aliases, db.verse_cards, async (tx) => {
+      const now = new Date().toISOString();
+      
+      // Add alias if it doesn't exist
+      const existingAlias = await tx.aliases.where('alias').equals(alias).first();
+      if (!existingAlias) {
+        await tx.aliases.add({
+          id: crypto.randomUUID(),
+          alias: alias,
+          verse_id: verse.id,
+          created_at: now
+        });
+      }
+
+      // Create verse_card
+      const cardData: LocalDBSchema['verse_cards'] = {
+        id: crypto.randomUUID(),
+        user_id: userId,
+        verse_id: verse.id,
+        current_phase: 'daily',
+        phase_progress_count: 0,
+        last_reviewed_at: null,
+        next_due_date: nextDueDate,
+        assigned_day_of_week: null,
+        assigned_week_parity: null,
+        assigned_day_of_month: null,
+        archived: false,
+        current_streak: 0,
+        best_streak: 0,
+        created_at: now,
+        updated_at: now
+      };
+      await tx.verse_cards.add(cardData);
+
+      result.local = { verse: verse, verseCard: cardData };
+    });
+  },
+
+  // This method is no longer needed - edge functions handle verse creation
+  async createNewVerseEverywhere(_reference: string, _text: string, _alias: string, _userId: string, _nextDueDate: string, _result: any) {
+    // Edge functions now handle verse creation securely
+    // This method should not be called in the new architecture
+    throw new Error('Verse creation is now handled by secure edge functions');
+  },
+
+  /**
+   * Records a review log entry with dual-write strategy
+   * ✅ FIXED: Transaction contains only Dexie operations, external calls outside
+   */
+  async recordReview(
+    verseCardId: string,
+    userId: string,
+    wasSuccessful: boolean,
+    reviewTimeSeconds?: number
+  ): Promise<DualWriteResult<LocalDBSchema['review_logs']>> {
+    const result: DualWriteResult<LocalDBSchema['review_logs']> = {
+      local: null,
+      remote: null,
+      errors: {},
+      success: false
+    };
+
+    try {
+      // Step 1: Create review log in transaction (no external calls)
+      let localLog: LocalDBSchema['review_logs'];
+      const todayUTC = new Date().toISOString().split('T')[0];
+      
+      await db.transaction('rw', db.review_logs, async (tx) => {
+        // Check for existing review today within transaction
+        const existingReview = await tx.review_logs
+          .where(['verse_card_id', 'user_id'])
+          .equals([verseCardId, userId])
+          .filter(log => {
+            const logDate = new Date(log.created_at).toISOString().split('T')[0];
+            return logDate === todayUTC;
+          })
+          .first();
+
+        if (existingReview) {
+          throw new Error('Review already recorded for today');
+        }
+
+        // Create review log within transaction
+        const now = new Date().toISOString();
+        const logData: LocalDBSchema['review_logs'] = {
+          id: crypto.randomUUID(),
+          user_id: userId,
+          verse_card_id: verseCardId,
+          was_successful: wasSuccessful,
+          counted_toward_progress: false, // Will be updated by trigger if applicable
+          review_time_seconds: reviewTimeSeconds || null,
+          created_at: now
+        };
+        await tx.review_logs.add(logData);
+        localLog = logData;
+      });
+
+      result.local = localLog!;
+
+      // Step 2: Database trigger will handle all verse card updates automatically
+      // including: phase progression, due dates, streaks, timestamps, etc.
+      console.log('Review recorded:', {
+        verseCardId,
+        wasSuccessful,
+        reviewTime: reviewTimeSeconds
+      });
+
+      // Step 3: Sync to remote (graceful degradation on failure) - OUTSIDE transaction
+      try {
+        // Get local references for remote sync
+        const localCard = await db.verse_cards.get(verseCardId);
+        if (localCard) {
+          const localVerse = await db.verses.get(localCard.verse_id);
+          if (localVerse) {
+            // Find remote verse by reference+translation
+            const { data: remoteVerses, error: verseSelectError } = await supabaseClient
+              .from('verses')
+              .select('id')
+              .eq('reference', localVerse.reference)
+              .eq('translation', localVerse.translation);
+
+            if (verseSelectError) {
+              throw verseSelectError;
+            }
+
+            if (remoteVerses && remoteVerses.length > 0) {
+              const remoteVerse = remoteVerses[0];
+              // Find remote card by user_id + verse_id
+              const { data: remoteCards, error: cardSelectError } = await supabaseClient
+                .from('verse_cards')
+                .select('id')
+                .eq('user_id', userId)
+                .eq('verse_id', remoteVerse.id);
+
+              if (cardSelectError) {
+                throw cardSelectError;
+              }
+
+              const remoteCard = remoteCards && remoteCards.length > 0 ? remoteCards[0] : null;
+
+              if (remoteCard) {
+                // Create review log remotely
+                const { error: reviewError } = await supabaseClient
+                  .from('review_logs')
+                  .insert({
+                    user_id: userId,
+                    verse_card_id: remoteCard.id,
+                    was_successful: wasSuccessful,
+                    counted_toward_progress: false, // Remote trigger will handle this
+                    review_time_seconds: reviewTimeSeconds || null
+                  });
+
+                if (reviewError) {
+                  throw reviewError;
+                }
+                console.log('Review synced to remote successfully');
+              }
+            }
+          }
+        }
+        result.remote = null; // We don't return the remote log object
+      } catch (error) {
+        result.errors.remote = new NetworkError(
+          'Failed to sync review log to remote database - data saved locally',
+          error as Error
+        );
+        // Don't throw here - local operation succeeded
+      }
+
+      result.success = true;
+      return result;
+
+    } catch (error) {
+      result.errors.local = error as Error;
+      throw new Error(`Failed to record review: ${(error as Error).message}`);
+    }
+  },
+
   /**
    * Syncs local changes to remote database using content-based matching
+   * ✅ FIXED: External API calls separate from any transaction operations
    */
   async syncToRemote(userId: string, lastSyncTimestamp?: string): Promise<{
     synced: number;
@@ -258,7 +598,11 @@ export const dataService = {
 
     try {
       // Get local verse cards for the user (filter by timestamp if provided)
-      let localCards = await localDb.verseCards.getByUser(userId);
+      let localCards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived)
+        .toArray();
 
       // Filter by lastSyncTimestamp if provided for incremental sync
       if (lastSyncTimestamp) {
@@ -270,100 +614,44 @@ export const dataService = {
       for (const localCard of localCards) {
         try {
           // Get the verse for this card
-          const localVerse = await localDb.verses.findById(localCard.verse_id);
+          const localVerse = await db.verses.get(localCard.verse_id);
           if (!localVerse) {
             throw new Error(`Local verse not found for card ${localCard.id}`);
           }
 
-          // Step 1: Ensure the verse exists remotely (use shared UUID)
-          let remoteVerse;
-          const { data: existingRemoteVerse } = await supabaseClient
-            .from('verses')
-            .select('*')
-            .eq('reference', localVerse.reference)
-            .eq('translation', localVerse.translation)
-            .single();
+          // Step 1: Ensure the verse exists remotely (should already exist due to edge functions)
+          // Just get the remote verse by reference since edge functions maintain consistency
+          const { data: remoteVerse, error: verseError } = await supabaseDb.verses.getByReference(
+            localVerse.reference,
+            localVerse.translation
+          );
 
-          if (existingRemoteVerse) {
-            remoteVerse = existingRemoteVerse;
-          } else {
-            // Create verse remotely
-            const { data: newRemoteVerse, error: verseError } = await supabaseClient
-              .from('verses')
-              .insert({
-                reference: localVerse.reference,
-                text: localVerse.text,
-                translation: localVerse.translation,
-                aliases: localVerse.aliases
-              })
-              .select()
-              .single();
-
-            if (verseError) {
-              throw verseError;
-            }
-            remoteVerse = newRemoteVerse;
+          if (verseError || !remoteVerse) {
+            // If verse doesn't exist remotely, skip sync (this shouldn't happen with new architecture)
+            console.warn(`Verse ${localVerse.reference} not found remotely, skipping sync`);
+            result.failed++;
+            result.errors.push(new Error(`Verse ${localVerse.reference} not found remotely`));
+            continue;
           }
 
-          // Step 2: Check if verse card exists remotely (match by user_id + verse reference)
-          const { data: existingRemoteCard } = await supabaseClient
-            .from('verse_cards')
-            .select('*')
-            .eq('user_id', localCard.user_id)
-            .eq('verse_id', remoteVerse.id)
-            .single();
+          
 
-          if (!existingRemoteCard) {
-            // Create verse card remotely
-            const { error: cardError } = await supabaseClient
-              .from('verse_cards')
-              .insert({
-                user_id: localCard.user_id,
-                verse_id: remoteVerse.id,
-                current_phase: localCard.current_phase,
-                phase_progress_count: localCard.phase_progress_count,
-                last_reviewed_at: localCard.last_reviewed_at,
-                next_due_date: localCard.next_due_date,
-                assigned_day_of_week: localCard.assigned_day_of_week,
-                assigned_week_parity: localCard.assigned_week_parity,
-                assigned_day_of_month: localCard.assigned_day_of_month,
-                archived: localCard.archived,
-                current_streak: localCard.current_streak,
-                best_streak: localCard.best_streak
-              });
-
-            if (cardError) {
-              throw cardError;
-            }
+          // Step 2: Check if verse card exists remotely and handle accordingly
+          // This logic could be moved to a helper function in supabase.ts for better abstraction
+          
+          // Create the card using the helper
+          const {error: cardError, statusText} = await supabaseDb.verseCards.findOrCreate({...localCard, verse_id: remoteVerse.id});
+          
+          if (statusText === "found") {
+            // Card already exists remotely, no need to sync
+            console.log('Verse card already exists remotely');
+          } else if (!cardError) {
             result.synced++;
+          } else if (cardError?.code === '23505') { // Unique constraint violation
+            // Card already exists, could update if needed
+            console.log('Verse card already exists remotely, skipping');
           } else {
-            // Update existing card if local is newer
-            const localUpdated = new Date(localCard.updated_at);
-            const remoteUpdated = new Date(existingRemoteCard.updated_at);
-
-            if (localUpdated > remoteUpdated) {
-              const { error: updateError } = await supabaseClient
-                .from('verse_cards')
-                .update({
-                  current_phase: localCard.current_phase,
-                  phase_progress_count: localCard.phase_progress_count,
-                  last_reviewed_at: localCard.last_reviewed_at,
-                  next_due_date: localCard.next_due_date,
-                  assigned_day_of_week: localCard.assigned_day_of_week,
-                  assigned_week_parity: localCard.assigned_week_parity,
-                  assigned_day_of_month: localCard.assigned_day_of_month,
-                  archived: localCard.archived,
-                  current_streak: localCard.current_streak,
-                  best_streak: localCard.best_streak,
-                  updated_at: localCard.updated_at
-                })
-                .eq('id', existingRemoteCard.id);
-
-              if (updateError) {
-                throw updateError;
-              }
-              result.synced++;
-            }
+            throw cardError;
           }
         } catch (error) {
           result.failed++;
@@ -380,6 +668,7 @@ export const dataService = {
 
   /**
    * Syncs remote changes to local database using content-based matching
+   * ✅ FIXED: External API calls separate from transaction operations
    */
   async syncFromRemote(userId: string, lastSyncTimestamp?: string): Promise<{
     synced: number;
@@ -417,53 +706,44 @@ export const dataService = {
         try {
           const remoteVerse = remoteCard.verses;
 
-          // Step 1: Ensure the verse exists locally
-          let localVerse = await localDb.verses.findByReference(
-            remoteVerse.reference,
-            remoteVerse.translation
-          );
+          // Step 1: Ensure the verse exists locally (outside transaction)
+          let localVerse = await db.verses
+            .where('[reference+translation]')
+            .equals([remoteVerse.reference, remoteVerse.translation])
+            .first();
 
           if (!localVerse) {
-            // Create verse locally
-            localVerse = await localDb.verses.create({
-              reference: remoteVerse.reference,
-              text: remoteVerse.text,
-              translation: remoteVerse.translation,
-              aliases: remoteVerse.aliases || []
+            // Create verse locally using transaction
+            await db.transaction('rw', db.verses, async (tx) => {
+              const now = new Date().toISOString();
+              const verseData: LocalDBSchema['verses'] = {
+                id: remoteVerse.id,
+                reference: remoteVerse.reference,
+                text: remoteVerse.text,
+                translation: remoteVerse.translation,
+                created_at: now,
+                updated_at: now
+              };
+              await tx.verses.add(verseData);
+              localVerse = verseData;
             });
           }
 
           // Step 2: Check if verse card exists locally
-          const localCard = await localDb.verseCards.findByUserAndVerse(
-            userId,
-            localVerse.id!
-          );
+          const localCard = await db.verse_cards
+            .where('[user_id+verse_id]')
+            .equals([userId, localVerse!.id!])
+            .first();
 
           if (!localCard) {
-            // Create verse card locally
-            await localDb.verseCards.create({
-              user_id: remoteCard.user_id,
-              verse_id: localVerse.id!,
-              current_phase: remoteCard.current_phase,
-              phase_progress_count: remoteCard.phase_progress_count,
-              last_reviewed_at: remoteCard.last_reviewed_at,
-              next_due_date: remoteCard.next_due_date,
-              assigned_day_of_week: remoteCard.assigned_day_of_week,
-              assigned_week_parity: remoteCard.assigned_week_parity,
-              assigned_day_of_month: remoteCard.assigned_day_of_month,
-              archived: remoteCard.archived,
-              current_streak: remoteCard.current_streak,
-              best_streak: remoteCard.best_streak
-            });
-            result.synced++;
-          } else {
-            // Update existing card if remote is newer
-            const localUpdated = new Date(localCard.updated_at);
-            const remoteUpdated = new Date(remoteCard.updated_at);
-
-            if (remoteUpdated > localUpdated) {
-              await db.verse_cards.update(localCard.id!, {
-                current_phase: remoteCard.current_phase,
+            // Create verse card locally using transaction
+            await db.transaction('rw', db.verse_cards, async (tx) => {
+              const now = new Date().toISOString();
+              const cardData: LocalDBSchema['verse_cards'] = {
+                id: crypto.randomUUID(),
+                user_id: remoteCard.user_id,
+                verse_id: localVerse!.id!,
+                current_phase: remoteCard.current_phase as 'daily' | 'weekly' | 'biweekly' | 'monthly',
                 phase_progress_count: remoteCard.phase_progress_count,
                 last_reviewed_at: remoteCard.last_reviewed_at,
                 next_due_date: remoteCard.next_due_date,
@@ -472,8 +752,34 @@ export const dataService = {
                 assigned_day_of_month: remoteCard.assigned_day_of_month,
                 archived: remoteCard.archived,
                 current_streak: remoteCard.current_streak,
-                best_streak: remoteCard.best_streak,
-                updated_at: remoteCard.updated_at
+                best_streak: remoteCard.best_streak || 0,
+                created_at: now,
+                updated_at: now
+              };
+              await tx.verse_cards.add(cardData);
+            });
+            result.synced++;
+          } else {
+            // Update existing card if remote is newer
+            const localUpdated = new Date(localCard.updated_at);
+            const remoteUpdated = new Date(remoteCard.updated_at || localCard.updated_at);
+
+            if (remoteUpdated > localUpdated) {
+              await db.transaction('rw', db.verse_cards, async (tx) => {
+                const updateData = {
+                  current_phase: remoteCard.current_phase as 'daily' | 'weekly' | 'biweekly' | 'monthly',
+                  phase_progress_count: remoteCard.phase_progress_count,
+                  last_reviewed_at: remoteCard.last_reviewed_at || undefined,
+                  next_due_date: remoteCard.next_due_date,
+                  assigned_day_of_week: remoteCard.assigned_day_of_week,
+                  assigned_week_parity: remoteCard.assigned_week_parity,
+                  assigned_day_of_month: remoteCard.assigned_day_of_month,
+                  archived: remoteCard.archived,
+                  current_streak: remoteCard.current_streak,
+                  best_streak: remoteCard.best_streak || 0,
+                  updated_at: remoteCard.updated_at || new Date().toISOString()
+                };
+                await tx.verse_cards.update(localCard.id!, updateData);
               });
               result.synced++;
             }
@@ -523,12 +829,16 @@ export const dataService = {
       source: 'local' | 'remote' | 'both';
     }> = [];
 
-    // Get local verses
-    const localCards = await localDb.verseCards.getByUser(userId);
+    // Get local verses (no transaction needed for read operations)
+    const localCards = await db.verse_cards
+      .where('user_id')
+      .equals(userId)
+      .filter(card => !card.archived)
+      .toArray();
 
     for (const card of localCards) {
       // Get verse data
-      const verse = await localDb.verses.findById(card.verse_id);
+      const verse = await db.verses.get(card.verse_id);
       if (verse) {
         results.push({
           verse,
@@ -540,123 +850,7 @@ export const dataService = {
 
     // TODO: Merge with remote data (for now, just return local)
     // This would involve fetching from Supabase and merging based on timestamps
-
     return results;
-  },
-
-  /**
-   * Records a review log entry with dual-write strategy
-   */
-  async recordReview(
-    verseCardId: string,
-    userId: string,
-    wasSuccessful: boolean,
-    reviewTimeSeconds?: number
-  ): Promise<DualWriteResult<LocalDBSchema['review_logs']>> {
-    const result: DualWriteResult<LocalDBSchema['review_logs']> = {
-      local: null,
-      remote: null,
-      errors: {},
-      success: false
-    };
-
-    try {
-      // Step 1: Check for existing review today (race condition protection)
-      // Use UTC dates for consistency with backend unique constraint
-      const todayUTC = new Date().toISOString().split('T')[0];
-      const existingReview = await db.review_logs
-        .where(['verse_card_id', 'user_id'])
-        .equals([verseCardId, userId])
-        .filter(log => {
-          const logDate = new Date(log.created_at).toISOString().split('T')[0];
-          return logDate === todayUTC;
-        })
-        .first();
-
-      if (existingReview) {
-        throw new Error('Card already reviewed today');
-      }
-
-      // Step 2: Save review log locally first (fast operation)
-      // Note: counted_toward_progress will be determined by database trigger
-      const localLog = await localDb.reviewLogs.create({
-        user_id: userId,
-        verse_card_id: verseCardId,
-        was_successful: wasSuccessful,
-        counted_toward_progress: false, // Will be updated by trigger if applicable
-        review_time_seconds: reviewTimeSeconds || null
-      });
-
-      result.local = localLog;
-
-      // Step 3: Database trigger will handle all verse card updates automatically
-      // including: phase progression, due dates, streaks, timestamps, etc.
-      console.log('Review recorded:', {
-        verseCardId,
-        wasSuccessful,
-        reviewTime: reviewTimeSeconds
-      });
-
-      // Step 4: Sync to remote (graceful degradation on failure)
-      try {
-        // Find the corresponding remote verse card to sync the review
-        const localCard = await localDb.verseCards.get(verseCardId);
-        if (localCard) {
-          const localVerse = await localDb.verses.findById(localCard.verse_id);
-          if (localVerse) {
-            // Find remote verse by reference+translation
-            const { data: remoteVerse } = await supabaseClient
-              .from('verses')
-              .select('id')
-              .eq('reference', localVerse.reference)
-              .eq('translation', localVerse.translation)
-              .single();
-
-            if (remoteVerse) {
-              // Find remote card by user_id + verse_id
-              const { data: remoteCard } = await supabaseClient
-                .from('verse_cards')
-                .select('id')
-                .eq('user_id', userId)
-                .eq('verse_id', remoteVerse.id)
-                .single();
-
-              if (remoteCard) {
-                // Create review log remotely
-                const { error: reviewError } = await supabaseClient
-                  .from('review_logs')
-                  .insert({
-                    user_id: userId,
-                    verse_card_id: remoteCard.id,
-                    was_successful: wasSuccessful,
-                    counted_toward_progress: false, // Remote trigger will handle this
-                    review_time_seconds: reviewTimeSeconds || null
-                  });
-
-                if (reviewError) {
-                  throw reviewError;
-                }
-                console.log('Review synced to remote successfully');
-              }
-            }
-          }
-        }
-        result.remote = null; // We don't return the remote log object
-      } catch (error) {
-        result.errors.remote = new NetworkError(
-          'Failed to sync review log to remote database - data saved locally',
-          error as Error
-        );
-        // Don't throw here - local operation succeeded
-      }
-
-      result.success = true;
-      return result;
-
-    } catch (error) {
-      result.errors.local = error as Error;
-      throw new Error(`Failed to record review: ${(error as Error).message}`);
-    }
   }
 };
 

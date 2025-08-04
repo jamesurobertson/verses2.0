@@ -11,20 +11,15 @@ import { dataService } from '../services/dataService';
 import { db } from '../services/localDb';
 
 interface BackgroundSyncOptions {
-  intervalMinutes?: number;
-  syncOnFocus?: boolean;
   syncOnOnline?: boolean;
 }
 
 export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
   const { user, loading } = useAuth();
   const lastSyncRef = useRef<string | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const dbReadyRef = useRef<boolean>(false);
   
   const {
-    intervalMinutes = 5, // Default 5 minutes
-    syncOnFocus = true,
     syncOnOnline = true
   } = options;
 
@@ -43,7 +38,7 @@ export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
     }
 
     try {
-      console.log('Background sync starting...');
+      console.log('sync starting...');
       const result = await dataService.sync(user.id, lastSyncRef.current || undefined);
       
       // Update last sync timestamp for next incremental sync
@@ -59,6 +54,10 @@ export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
       
       if (totalFailed > 0) {
         console.warn(`Background sync issues: ${totalFailed} items failed`);
+      }
+      
+      if (totalFailed === 0 && totalSynced === 0) {
+        console.log('Background sync completed: no changes to sync');
       }
       
     } catch (error) {
@@ -82,41 +81,16 @@ export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
     initDB();
   }, []);
 
-  // Set up periodic sync (only when ready)
+  // Initial sync on app load (only when ready)
   useEffect(() => {
     if (!isReadyToSync) return;
 
-    console.log('Starting background sync for user:', user?.id);
-
-    // Start periodic sync
-    intervalRef.current = setInterval(performSync, intervalMinutes * 60 * 1000);
-
-    // Initial sync when ready
+    console.log('App loaded - performing initial sync for user:', user?.id);
+    
+    // Only sync once on app load
     performSync();
+  }, [isReadyToSync]);
 
-    // Cleanup
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        console.log('Background sync stopped');
-      }
-    };
-  }, [isReadyToSync, intervalMinutes]);
-
-  // Sync on window focus (user returns to app)
-  useEffect(() => {
-    if (!syncOnFocus) return;
-
-    const handleFocus = () => {
-      if (isReadyToSync) {
-        console.log('App focused - triggering sync');
-        performSync();
-      }
-    };
-
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [syncOnFocus, isReadyToSync]);
 
   // Sync when network comes back online
   useEffect(() => {

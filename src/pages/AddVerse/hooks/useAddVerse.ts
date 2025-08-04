@@ -37,7 +37,7 @@ interface UseAddVerseReturn extends AddVerseFormState {
 }
 
 export function useAddVerse(): UseAddVerseReturn {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   
   // Form state management
   const [state, setState] = useState<AddVerseFormState>({
@@ -167,22 +167,44 @@ export function useAddVerse(): UseAddVerseReturn {
     }));
 
     try {
-      // Final validation before adding
-      const isValid = await validateReference(reference);
-      if (!isValid) {
+      // Quick validation without debounce for submit
+      const normalized = normalizeReferenceForLookup(reference);
+      const hasBasicStructure = /[a-z]+\s*\d+/.test(normalized);
+      if (!hasBasicStructure) {
         setState(prev => ({
           ...prev,
           isLoading: false,
-          error: prev.validationError || 'Invalid Bible reference'
+          success: null,
+          error: 'Please enter a Bible reference (e.g., "John 3:16" or "Gal 1")'
         }));
         return;
       }
 
+      // Show immediate success without verse text
+      setState(prev => ({
+        ...prev,
+        success: {
+          reference: reference,
+          text: '', // Empty initially - will load in background
+          verse: null as any,
+          verseCard: null as any
+        }
+      }));
+
+      // Get access token for secure API calls
+      const accessToken = await getAccessToken();
+      console.log('🔑 Access token retrieved:', accessToken ? 'Token found' : 'No token');
+      if (!accessToken) {
+        // Clear optimistic state on error
+        setState(prev => ({ ...prev, success: null }));
+        throw new Error('Unable to authenticate request');
+      }
+
       // Add verse using data service - ESV API will handle parsing and formatting
-      const result = await dataService.addVerse(reference, user.id);
+      const result = await dataService.addVerse(reference, user.id, accessToken);
 
       if (result.success && result.local) {
-        // Success - show confirmation
+        // Success - update with actual verse data (but user already saw success)
         setState(prev => ({
           ...prev,
           isLoading: false,

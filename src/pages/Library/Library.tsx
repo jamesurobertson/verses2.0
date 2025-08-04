@@ -5,7 +5,6 @@
 
 import { useMemo, useState } from 'react';
 import { useLibrary, type LibraryVerseCard } from './hooks/useLibrary';
-import { useAuth } from '../../contexts/AuthContext';
 
 // Biblical books organized by testament
 const OLD_TESTAMENT_BOOKS = [
@@ -75,7 +74,6 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
 };
 
 export function Library() {
-  const { isAuthenticated } = useAuth();
   const { verses, loading, error, refreshLibrary, clearError } = useLibrary();
   const [activeTestament, setActiveTestament] = useState<'Old Testament' | 'New Testament'>('New Testament');
   const [expandedBooks, setExpandedBooks] = useState<Set<string>>(new Set());

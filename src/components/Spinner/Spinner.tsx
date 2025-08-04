@@ -1,4 +1,3 @@
-import React from 'react';
 
 const BookLoader = () => {
   const strokeLength = 180; // total approx length for smooth animation

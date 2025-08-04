@@ -11,7 +11,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "supadbreset": "supabase db reset --linked",
+    "supatypes": "supabase gen types typescript --linked > src/types/database.ts",
+    "supafnd": "supabase functions deploy"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.52.0",
@@ -37,6 +40,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.21",
+    "dotenv-cli": "^10.0.0",
     "eslint": "^9.30.1",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -46,6 +50,7 @@
     "jest": "^30.0.5",
     "jest-environment-jsdom": "^30.0.5",
     "postcss": "^8.5.6",
+    "supabase": "^2.33.9",
     "tailwindcss": "^4.1.11",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",

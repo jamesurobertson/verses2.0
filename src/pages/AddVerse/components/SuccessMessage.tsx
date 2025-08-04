@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/Button/Button';
+
+import type { LocalDBSchema } from '../../../services/localDb';
 
 export interface SuccessMessageProps {
   reference: string;
   text: string;
-  verseCard: { id: string; verse_id: number };
+  verseCard: LocalDBSchema['verse_cards'];
   onAddAnother?: () => void;
   onGoToLibrary?: () => void;
   onStartReviewing?: () => void;
-  onRemoveVerse?: (verseCardId: number) => Promise<void>;
+  onRemoveVerse?: (verseCardId: string) => Promise<void>;
   className?: string;
   'data-testid'?: string;
 }
@@ -25,15 +26,11 @@ export const SuccessMessage: React.FC<SuccessMessageProps> = ({
   className = '',
   'data-testid': testId,
 }) => {
-  const navigate = useNavigate();
   const [isRemoving, setIsRemoving] = useState(false);
   
   // Truncate text if too long for display
   const displayText = text.length > 200 ? `${text.substring(0, 200)}...` : text;
 
-  const handleBack = () => {
-    navigate(-1);
-  };
 
   const handleRemoveVerse = async () => {
     console.log('handleRemoveVerse', verseCard, onRemoveVerse);
@@ -100,9 +97,16 @@ export const SuccessMessage: React.FC<SuccessMessageProps> = ({
           </button>
         {/* )} */}
         
-        <p className="text-primary text-lg leading-relaxed mb-3 pr-8" style={{ fontFamily: 'Crimson Text, serif' }}>
-          "{displayText}"
-        </p>
+        {text && (
+          <p className="text-primary text-lg leading-relaxed mb-3 pr-8" style={{ fontFamily: 'Crimson Text, serif' }}>
+            "{displayText}"
+          </p>
+        )}
+        {!text && (
+          <p className="text-primary/60 text-base mb-3 pr-8">
+            Verse text will appear in your library and review sessions.
+          </p>
+        )}
         <cite className="text-primary/70 text-base font-medium" style={{ fontFamily: 'Crimson Text, serif' }}>
           — {reference} (ESV)
         </cite>

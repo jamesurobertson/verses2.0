@@ -178,7 +178,7 @@ export function validateCardAssignments(card: LibraryVerseCard | ReviewPhaseCard
       // Weekly cards should have day of week but not parity or day of month
       if (card.assignedDayOfWeek === null) {
         errors.push('Weekly card must have assignedDayOfWeek set');
-      } else if (card.assignedDayOfWeek < 1 || card.assignedDayOfWeek > 7) {
+      } else if (card.assignedDayOfWeek! < 1 || card.assignedDayOfWeek! > 7) {
         errors.push('Weekly card assignedDayOfWeek must be 1-7');
       }
       if (card.assignedWeekParity !== null) {
@@ -193,7 +193,7 @@ export function validateCardAssignments(card: LibraryVerseCard | ReviewPhaseCard
       // Biweekly cards should have day of week and week parity
       if (card.assignedDayOfWeek === null) {
         errors.push('Biweekly card must have assignedDayOfWeek set');
-      } else if (card.assignedDayOfWeek < 1 || card.assignedDayOfWeek > 7) {
+      } else if (card.assignedDayOfWeek! < 1 || card.assignedDayOfWeek! > 7) {
         errors.push('Biweekly card assignedDayOfWeek must be 1-7');
       }
       if (card.assignedWeekParity === null) {
@@ -210,7 +210,7 @@ export function validateCardAssignments(card: LibraryVerseCard | ReviewPhaseCard
       // Monthly cards should have day of month but not day of week or parity
       if (card.assignedDayOfMonth === null) {
         errors.push('Monthly card must have assignedDayOfMonth set');
-      } else if (card.assignedDayOfMonth < 1 || card.assignedDayOfMonth > 28) {
+      } else if (card.assignedDayOfMonth! < 1 || card.assignedDayOfMonth! > 28) {
         errors.push('Monthly card assignedDayOfMonth must be 1-28');
       }
       if (card.assignedDayOfWeek !== null) {

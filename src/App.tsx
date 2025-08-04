@@ -33,8 +33,6 @@ function App() {
 function AppContent() {
   // Enable background sync with default settings
   useBackgroundSync({
-    intervalMinutes: 5,    // Sync every 5 minutes
-    syncOnFocus: true,     // Sync when user returns to app
     syncOnOnline: true     // Sync when network reconnects
   });
 

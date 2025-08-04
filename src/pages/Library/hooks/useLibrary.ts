@@ -13,9 +13,9 @@ import { countDueCards } from '../../../utils/assignmentLogic';
 
 // Library-specific verse card interface with assignment fields
 export interface LibraryVerseCard {
-  id: number;
+  id: string;
   verse: {
-    id: number;
+    id: string;
     reference: string;
     text: string;
     translation: string;

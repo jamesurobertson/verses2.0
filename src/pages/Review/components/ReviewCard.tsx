@@ -5,8 +5,9 @@
  * Shows reference, allows toggling text visibility, and captures review results.
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { LibraryVerseCard } from '../../Library/hooks/useLibrary';
+import { Button } from '../../../components/Button';
 
 interface ReviewCardProps {
   verseCard: LibraryVerseCard;
@@ -17,157 +18,126 @@ interface ReviewCardProps {
     current: number;
     total: number;
   };
+  referenceDisplayMode: string;
 }
 
-export function ReviewCard({ verseCard, onCorrect, onIncorrect, showProgress, progress }: ReviewCardProps) {
+export function ReviewCard({ verseCard, onCorrect, onIncorrect, referenceDisplayMode }: ReviewCardProps) {
   const [showingText, setShowingText] = useState(false);
-  const [hasAnswered, setHasAnswered] = useState(false);
 
-  const { verse, currentPhase, currentStreak } = verseCard;
+  const { verse } = verseCard;
 
   const handleToggleText = () => {
     setShowingText(!showingText);
   };
 
   const handleCorrect = () => {
-    setHasAnswered(true);
     onCorrect();
   };
 
   const handleIncorrect = () => {
-    setHasAnswered(true);
     onIncorrect();
   };
 
-  const phaseColors = {
-    daily: 'bg-success/10 text-success',
-    weekly: 'bg-primary/10 text-primary',
-    biweekly: 'bg-accent/10 text-accent',
-    monthly: 'bg-error/10 text-error'
-  };
+  let textDisplay;
 
-  const phaseLabels = {
-    daily: 'Daily',
-    weekly: 'Weekly',
-    biweekly: 'Bi-weekly',
-    monthly: 'Monthly'
-  };
+  switch (referenceDisplayMode) {
+    case 'first':
+      textDisplay = verse.text;
+      break;
+    case 'full':
+      textDisplay = verse.text.split(/\s+/)
+      .map(word => {
+        // Match leading punctuation, core word (letters, apostrophes, hyphens, dashes), trailing punctuation
+        // Apostrophes included inside core: ASCII ' and Unicode ’ (U+2019)
+        const m = word.match(/^([^A-Za-z\u2019'\-–—]*)([A-Za-z\u2019'\-–—]+)([^A-Za-z\u2019'\-–—]*)$/);
+        if (!m) return word; // leave pure punctuation untouched
+        const [, leading, core, trailing] = m;
+  
+        // Split core on hyphen (-), en-dash (–, U+2013), em-dash (—, U+2014)
+        const parts = core.split(/([-–—])/);
+  
+        // For each segment that is letters+apostrophes, take first letter plus any apostrophes inside
+        // But only keep the first letter of each segment; apostrophes are part of letters here, so skip them.
+        const reducedCore = parts
+          .map(part => {
+            if (/^[-–—]$/.test(part)) return part; // keep dashes as-is
+  
+            // If part has apostrophes, just take first letter (skip apostrophes)
+            // For example, "Lord’s" → "L"
+            const firstLetterMatch = part.match(/[A-Za-z]/);
+            return firstLetterMatch ? firstLetterMatch[0] + '\u00A0\u00A0' : part;
+          })
+          .join('');
+  
+        return leading + reducedCore + trailing;
+      })
+      .join(' ');
+      break;
+    case 'blank':
+      textDisplay = verse.text.split(' ').map((word) => {
+        return word.replace(/[^a-zA-Z]/g, '_');
+      }).join(' ');
+      break;
+  }
 
   return (
-    <div className="w-full max-w-2xl mx-auto">
-      {/* Progress indicator */}
-      {showProgress && progress && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between text-sm text-primary/70 mb-3">
-            <span>Card {progress.current} of {progress.total}</span>
-            <span className="flex items-center gap-2">
-              {currentStreak > 0 && (
-                <>
-                  <span className="text-accent">🔥</span>
-                  <span className="font-medium text-primary">{currentStreak} streak</span>
-                </>
-              )}
-            </span>
-          </div>
-          <div className="w-full bg-primary/10 rounded-full h-2">
-            <div 
-              className="bg-accent h-2 rounded-full transition-all duration-300"
-              style={{ width: `${(progress.current / progress.total) * 100}%` }}
-            />
-          </div>
-        </div>
-      )}
+    <div className="max-w-2xl mx-auto">
 
       {/* Main card */}
-      <div className="bg-background rounded-xl shadow-lg border border-primary/10 p-8 min-h-[500px] flex flex-col">
+      <div className="bg-background max-h-[500px] p-1 overflow-y-auto rounded-xl shadow-lg border border-primary/10 min-h-[300px] flex flex-col">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h2 className="font-crimson text-3xl font-semibold text-primary mb-4">
-            {verse.reference}
-          </h2>
-          
-          {/* Tally marks below reference */}
-          <div className="flex justify-center gap-1 mb-4">
-            {Array.from({ length: 5 }, (_, i) => (
-              <div
-                key={i}
-                className={`w-3 h-8 rounded-sm ${
-                  i < currentStreak ? 'bg-accent' : 'bg-primary/20'
-                }`}
-              />
-            ))}
-          </div>
-          
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${phaseColors[currentPhase]}`}>
-            {phaseLabels[currentPhase]} Phase
-          </span>
-        </div>
 
         {/* Verse content area */}
         <div className="flex-1 flex flex-col justify-center mb-8">
           {!showingText ? (
-            <div className="text-center">
-              <div className="text-6xl mb-6">📖</div>
-              <p className="text-primary/70 text-lg mb-8 max-w-md mx-auto leading-relaxed">
-                Try to recite this verse from memory, then reveal to check your answer.
-              </p>
-              <button
-                onClick={handleToggleText}
-                className="w-full px-6 py-4 bg-accent text-white rounded-lg font-medium text-lg hover:bg-accent/90 transition-colors"
-                disabled={hasAnswered}
-              >
-                Show Verse
-              </button>
-            </div>
+            <>
+              <div className="text-center mb-8">
+                <h2 className=" text-3xl font-semibold text-primary mb-4">
+                  {verse.reference}
+                </h2>
+              </div>
+              <div className="text-center">
+                <Button
+                  variant="outline"
+                  onClick={handleToggleText}
+                  size="medium"
+                  className="w-full"
+                >
+                  Show Verse
+                </Button>
+              </div>
+            </>
           ) : (
             <div className="text-center px-4">
-              <blockquote className="font-crimson text-xl leading-relaxed text-primary mb-6 max-w-lg mx-auto">
-                "{verse.text}"
-              </blockquote>
-              <cite className="font-crimson text-primary/70 font-medium">
-                {verse.reference} ({verse.translation})
+              <p className={`text-primary ${referenceDisplayMode === 'full' ? 'text-lg' : 'text-xl'} leading-relaxed mb-3 pr-8`} style={{ fontFamily: 'Crimson Text, serif' }}>
+                "{textDisplay}"
+              </p>
+              <cite className="text-primary/70 text-base font-medium" style={{ fontFamily: 'Crimson Text, serif' }}>
+                — {verse.reference}
               </cite>
             </div>
           )}
         </div>
-
-        {/* Action buttons */}
-        {showingText && !hasAnswered && (
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button
-              onClick={handleIncorrect}
-              className="w-full sm:w-auto px-8 py-4 bg-error text-white rounded-lg font-medium text-lg hover:bg-error/90 transition-colors flex items-center justify-center gap-2"
-            >
-              <span>❌</span>
-              Needs Work
-            </button>
-            <button
-              onClick={handleCorrect}
-              className="w-full sm:w-auto px-8 py-4 bg-success text-white rounded-lg font-medium text-lg hover:bg-success/90 transition-colors flex items-center justify-center gap-2"
-            >
-              <span>✅</span>
-              Correct
-            </button>
-          </div>
-        )}
-
-        {/* Post-answer state */}
-        {hasAnswered && (
-          <div className="text-center">
-            <div className="text-4xl mb-2">🎯</div>
-            <p className="text-primary/70">
-              Moving to next card...
-            </p>
-          </div>
-        )}
       </div>
 
-      {/* Instructions */}
-      {!showingText && !hasAnswered && (
-        <div className="mt-6 text-center text-sm text-primary/50">
-          <p>💡 Try to recite the verse from memory before revealing</p>
-        </div>
-      )}
+        {(
+          <div className="flex sm:flex-row mt-4 gap-4 justify-center">
+            <Button
+              onClick={handleIncorrect}
+              size="medium"
+              className="w-full"
+            >
+              <span style={{ fontSize: '2rem' }}>❌</span>
+            </Button>
+            <Button
+              onClick={handleCorrect}
+              size="medium"
+              className="w-full"
+            >
+              <span style={{ fontSize: '2rem' }}>✅</span>
+            </Button>
+          </div>
+        )}
     </div>
   );
 }

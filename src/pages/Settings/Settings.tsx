@@ -17,9 +17,6 @@ export function Settings() {
     }
   };
 
-  const referenceDisplayModeHandler = (preference: string) => {
-    // todo: sync userProfile cloud and local for reference_display_mode
-  }
 
   return (
     <div className="bg-background">

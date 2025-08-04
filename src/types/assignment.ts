@@ -94,14 +94,3 @@ export interface UserProfileWithTimezone {
   updated_at: string;
 }
 
-export default {
-  AssignmentCalculation,
-  OptimalAssignment,
-  AssignmentFields,
-  LibraryVerseCardWithAssignments,
-  TimezoneInfo,
-  DueCardCalculation,
-  AssignmentValidation,
-  PhaseTransition,
-  UserProfileWithTimezone,
-};

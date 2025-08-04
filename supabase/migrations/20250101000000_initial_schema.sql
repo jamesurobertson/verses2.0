@@ -4,6 +4,7 @@
 -- Drop existing tables and functions if they exist
 DROP TABLE IF EXISTS review_logs CASCADE;
 DROP TABLE IF EXISTS verse_cards CASCADE;
+DROP TABLE IF EXISTS aliases CASCADE;
 DROP TABLE IF EXISTS user_profiles CASCADE;
 DROP TABLE IF EXISTS verses CASCADE;
 DROP VIEW IF EXISTS due_cards_view CASCADE;
@@ -22,7 +23,6 @@ CREATE TABLE public.verses (
     reference text NOT NULL,
     text text NOT NULL,
     translation text NOT NULL DEFAULT 'ESV',
-    aliases TEXT[] DEFAULT '{}',
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
     UNIQUE(reference, translation)
@@ -30,6 +30,17 @@ CREATE TABLE public.verses (
 
 -- Enable RLS
 ALTER TABLE public.verses ENABLE ROW LEVEL SECURITY;
+
+-- Aliases Table
+CREATE TABLE public.aliases (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    alias text UNIQUE NOT NULL,
+    verse_id uuid NOT NULL REFERENCES public.verses(id) ON DELETE CASCADE,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+-- Enable RLS
+ALTER TABLE public.aliases ENABLE ROW LEVEL SECURITY;
 
 -- Verse Cards Table
 CREATE TABLE public.verse_cards (
@@ -88,7 +99,9 @@ ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 -- Create indexes for better performance
 CREATE INDEX idx_verses_reference ON verses(reference);
 CREATE INDEX idx_verses_translation ON verses(translation);
-CREATE INDEX idx_verses_aliases ON verses USING GIN (aliases);
+
+CREATE INDEX idx_aliases_alias ON aliases(alias);
+CREATE INDEX idx_aliases_verse_id ON aliases(verse_id);
 
 CREATE INDEX idx_verse_cards_user_id ON verse_cards(user_id);
 CREATE INDEX idx_verse_cards_verse_id ON verse_cards(verse_id);
@@ -109,20 +122,33 @@ CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
 CREATE INDEX idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX idx_user_profiles_timezone ON user_profiles(timezone);
 
--- RLS Policies for Verses (public read, authenticated insert)
+-- RLS Policies for Verses (public read, server-side insert only)
 CREATE POLICY "Verses are viewable by everyone" ON public.verses
     FOR SELECT USING (true);
 
-CREATE POLICY "Authenticated users can insert verses" ON public.verses
-    FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+-- No INSERT policy - verses can only be created via edge functions with SECURITY DEFINER
+
+-- RLS Policies for Aliases (public read, server-side insert only)
+CREATE POLICY "Aliases are viewable by everyone" ON public.aliases
+    FOR SELECT USING (true);
+
+-- No INSERT/UPDATE policies - aliases can only be created via edge functions with SECURITY DEFINER
 
 -- RLS Policies for Verse Cards
 CREATE POLICY "Users can manage their own verse cards" ON public.verse_cards
     FOR ALL USING (auth.uid() = user_id);
 
--- RLS Policies for Review Logs
-CREATE POLICY "Users can manage their own review logs" ON public.review_logs
-    FOR ALL USING (auth.uid() = user_id);
+-- RLS Policies for Review Logs (immutable audit records)
+CREATE POLICY "Users can view their own review logs" ON public.review_logs
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create their own review logs" ON public.review_logs
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own review logs" ON public.review_logs
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- No UPDATE policy - review logs are immutable audit records
 
 -- RLS Policies for User Profiles
 CREATE POLICY "Users can manage their own profile" ON public.user_profiles
@@ -159,8 +185,9 @@ RETURNS TRIGGER AS $$
 BEGIN
     -- Check if a profile already exists to prevent duplicate entries
     IF NOT EXISTS (SELECT 1 FROM public.user_profiles WHERE user_id = NEW.id) THEN
-        INSERT INTO public.user_profiles (user_id, email, full_name, timezone)
+        INSERT INTO public.user_profiles (id, user_id, email, full_name, timezone)
         VALUES (
+            gen_random_uuid(), -- Generate UUID for profile ID
             NEW.id, 
             NEW.email, 
             COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
@@ -463,52 +490,12 @@ CREATE TRIGGER process_review_comprehensive_trigger
     FOR EACH ROW
     EXECUTE FUNCTION process_review_comprehensive();
 
--- Create helpful views for common queries
-CREATE VIEW due_cards_view AS
-SELECT
-    vc.*,
-    v.reference,
-    v.text,
-    v.translation,
-    user_calcs.user_today,
-    user_calcs.user_dow,
-    user_calcs.user_week_parity,
-    user_calcs.user_dom
-FROM verse_cards vc
-JOIN verses v ON vc.verse_id = v.id
-JOIN user_profiles up ON vc.user_id = up.user_id
-CROSS JOIN LATERAL (
-    SELECT
-        (NOW() AT TIME ZONE up.timezone)::DATE as user_today,
-        EXTRACT(DOW FROM (NOW() AT TIME ZONE up.timezone)::DATE) as user_dow,
-        ((EXTRACT(EPOCH FROM (NOW() AT TIME ZONE up.timezone)::DATE)::INTEGER / 86400) / 7) % 2 as user_week_parity,
-        EXTRACT(DAY FROM (NOW() AT TIME ZONE up.timezone)::DATE) as user_dom
-) user_calcs
-WHERE vc.archived = FALSE
-AND (
-    -- Daily cards are always due
-    vc.current_phase = 'daily'
-    OR
-    -- Weekly cards due on assigned weekday
-    (vc.current_phase = 'weekly' AND vc.assigned_day_of_week = user_calcs.user_dow)
-    OR
-    -- Biweekly cards due on assigned weekday + week parity (epoch-based)
-    (vc.current_phase = 'biweekly'
-     AND vc.assigned_day_of_week = user_calcs.user_dow
-     AND vc.assigned_week_parity = user_calcs.user_week_parity)
-    OR
-    -- Monthly cards due on assigned day of month (only days 1-28)
-    (vc.current_phase = 'monthly'
-     AND vc.assigned_day_of_month = user_calcs.user_dom
-     AND user_calcs.user_dom <= 28)
-);
-
 -- Grant permissions
-GRANT SELECT ON due_cards_view TO authenticated;
-GRANT SELECT, INSERT ON verses TO authenticated;
+GRANT SELECT ON verses TO authenticated; -- Read-only from client
+GRANT SELECT ON aliases TO authenticated; -- Read-only from client
 -- Grant permissions for verse_cards table
 GRANT SELECT, INSERT, UPDATE, DELETE ON verse_cards TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON review_logs TO authenticated;
+GRANT SELECT, INSERT, DELETE ON review_logs TO authenticated; -- No UPDATE - review logs are immutable
 GRANT SELECT, INSERT, UPDATE, DELETE ON user_profiles TO authenticated;
 
 -- Function to initialize next_due_date when verse_card is inserted
@@ -557,4 +544,230 @@ FOR EACH ROW
 EXECUTE FUNCTION initialize_verse_card();
 
 -- Add comment for documentation
-COMMENT ON COLUMN public.verses.aliases IS 'Array of normalized reference formats that point to this verse (e.g. ["jn 1:1", "john 1:1"])';
+COMMENT ON TABLE public.aliases IS 'Normalized reference formats that point to verses (e.g. "jn 1:1", "john 1:1") for fast lookup';
+
+-- Optimized verse lookup function to reduce API calls
+CREATE OR REPLACE FUNCTION rpc_verse_lookup(
+  p_reference TEXT,
+  p_normalized TEXT,
+  p_user_id UUID DEFAULT NULL,
+  p_translation TEXT DEFAULT 'ESV'
+) RETURNS JSON AS $$
+DECLARE
+  result JSON;
+  found_via_alias BOOLEAN := false;
+BEGIN
+  -- Validate inputs
+  IF p_reference IS NULL OR p_normalized IS NULL THEN
+    RETURN '{"verse": null, "found_via_alias": false, "user_card": null, "error": "Invalid parameters"}'::json;
+  END IF;
+
+  -- Single query to get verse and user card data using JSON aggregation
+  WITH verse_lookup AS (
+    -- Direct verse lookup
+    SELECT 
+      v.id, v.reference, v.text, v.translation, v.created_at, v.updated_at,
+      vc.id as card_id, vc.user_id as card_user_id, vc.verse_id as card_verse_id,
+      vc.current_phase, vc.phase_progress_count, vc.last_reviewed_at,
+      vc.next_due_date, vc.assigned_day_of_week, vc.assigned_week_parity,
+      vc.assigned_day_of_month, vc.archived, vc.current_streak, vc.best_streak,
+      vc.created_at as card_created_at, vc.updated_at as card_updated_at,
+      false as via_alias
+    FROM verses v
+    LEFT JOIN verse_cards vc ON (vc.verse_id = v.id AND vc.user_id = p_user_id)
+    WHERE v.reference = p_reference AND v.translation = p_translation
+    
+    UNION ALL
+    
+    -- Alias lookup
+    SELECT 
+      v.id, v.reference, v.text, v.translation, v.created_at, v.updated_at,
+      vc.id as card_id, vc.user_id as card_user_id, vc.verse_id as card_verse_id,
+      vc.current_phase, vc.phase_progress_count, vc.last_reviewed_at,
+      vc.next_due_date, vc.assigned_day_of_week, vc.assigned_week_parity,
+      vc.assigned_day_of_month, vc.archived, vc.current_streak, vc.best_streak,
+      vc.created_at as card_created_at, vc.updated_at as card_updated_at,
+      true as via_alias
+    FROM aliases a
+    JOIN verses v ON v.id = a.verse_id
+    LEFT JOIN verse_cards vc ON (vc.verse_id = v.id AND vc.user_id = p_user_id)
+    WHERE a.alias = p_normalized AND v.translation = p_translation
+    AND NOT EXISTS (
+      SELECT 1 FROM verses v2 
+      WHERE v2.reference = p_reference AND v2.translation = p_translation
+    )
+  )
+  SELECT json_build_object(
+    'verse', CASE 
+      WHEN vl.id IS NOT NULL THEN json_build_object(
+        'id', vl.id,
+        'reference', vl.reference,
+        'text', vl.text,
+        'translation', vl.translation,
+        'created_at', vl.created_at,
+        'updated_at', vl.updated_at
+      )
+      ELSE NULL
+    END,
+    'found_via_alias', COALESCE(vl.via_alias, false),
+    'user_card', CASE 
+      WHEN vl.card_id IS NOT NULL THEN json_build_object(
+        'id', vl.card_id,
+        'user_id', vl.card_user_id,
+        'verse_id', vl.card_verse_id,
+        'current_phase', vl.current_phase,
+        'phase_progress_count', vl.phase_progress_count,
+        'last_reviewed_at', vl.last_reviewed_at,
+        'next_due_date', vl.next_due_date,
+        'assigned_day_of_week', vl.assigned_day_of_week,
+        'assigned_week_parity', vl.assigned_week_parity,
+        'assigned_day_of_month', vl.assigned_day_of_month,
+        'archived', vl.archived,
+        'current_streak', vl.current_streak,
+        'best_streak', vl.best_streak,
+        'created_at', vl.card_created_at,
+        'updated_at', vl.card_updated_at
+      )
+      ELSE NULL
+    END,
+    'error', NULL
+  ) INTO result
+  FROM verse_lookup vl
+  LIMIT 1;
+
+  -- Return empty result if nothing found
+  IF result IS NULL THEN
+    result := '{"verse": null, "found_via_alias": false, "user_card": null, "error": null}'::json;
+  END IF;
+
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant permission to authenticated users
+GRANT EXECUTE ON FUNCTION rpc_verse_lookup TO authenticated;
+
+-- Secure function to create verses (only callable from edge functions)
+CREATE OR REPLACE FUNCTION rpc_create_verse(
+  p_reference TEXT,
+  p_text TEXT,
+  p_translation TEXT DEFAULT 'ESV'
+) RETURNS JSON AS $$
+DECLARE
+  verse_id UUID;
+  result JSON;
+BEGIN
+  -- Validate inputs
+  IF p_reference IS NULL OR p_text IS NULL OR p_reference = '' OR p_text = '' THEN
+    RETURN json_build_object('error', 'Reference and text are required');
+  END IF;
+  
+  -- Check if verse already exists
+  SELECT id INTO verse_id 
+  FROM verses 
+  WHERE reference = p_reference AND translation = p_translation;
+  
+  IF verse_id IS NOT NULL THEN
+    -- Return existing verse
+    SELECT json_build_object(
+      'id', id,
+      'reference', reference,
+      'text', text,
+      'translation', translation,
+      'created_at', created_at,
+      'updated_at', updated_at,
+      'existed', true
+    ) INTO result
+    FROM verses
+    WHERE id = verse_id;
+    
+    RETURN result;
+  END IF;
+  
+  -- Create new verse
+  INSERT INTO verses (reference, text, translation)
+  VALUES (p_reference, p_text, p_translation)
+  RETURNING id, reference, text, translation, created_at, updated_at INTO verse_id, p_reference, p_text, p_translation;
+  
+  -- Return new verse
+  SELECT json_build_object(
+    'id', id,
+    'reference', reference,
+    'text', text,
+    'translation', translation,
+    'created_at', created_at,
+    'updated_at', updated_at,
+    'existed', false
+  ) INTO result
+  FROM verses
+  WHERE id = verse_id;
+  
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Secure function to create aliases (only callable from edge functions)
+CREATE OR REPLACE FUNCTION rpc_create_alias(
+  p_alias TEXT,
+  p_verse_id UUID
+) RETURNS JSON AS $$
+DECLARE
+  alias_id UUID;
+  result JSON;
+BEGIN
+  -- Validate inputs
+  IF p_alias IS NULL OR p_verse_id IS NULL OR p_alias = '' THEN
+    RETURN json_build_object('error', 'Alias and verse_id are required');
+  END IF;
+  
+  -- Check if alias already exists
+  SELECT id INTO alias_id 
+  FROM aliases 
+  WHERE alias = p_alias;
+  
+  IF alias_id IS NOT NULL THEN
+    -- Return existing alias
+    SELECT json_build_object(
+      'id', id,
+      'alias', alias,
+      'verse_id', verse_id,
+      'created_at', created_at,
+      'existed', true
+    ) INTO result
+    FROM aliases
+    WHERE id = alias_id;
+    
+    RETURN result;
+  END IF;
+  
+  -- Verify verse exists
+  IF NOT EXISTS (SELECT 1 FROM verses WHERE id = p_verse_id) THEN
+    RETURN json_build_object('error', 'Verse not found');
+  END IF;
+  
+  -- Create new alias
+  INSERT INTO aliases (alias, verse_id)
+  VALUES (p_alias, p_verse_id)
+  RETURNING id INTO alias_id;
+  
+  -- Return new alias
+  SELECT json_build_object(
+    'id', id,
+    'alias', alias,
+    'verse_id', verse_id,
+    'created_at', created_at,
+    'existed', false
+  ) INTO result
+  FROM aliases
+  WHERE id = alias_id;
+  
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permissions to service_role only (edge functions)
+GRANT EXECUTE ON FUNCTION rpc_create_verse TO service_role;
+GRANT EXECUTE ON FUNCTION rpc_create_alias TO service_role;
+
+-- Grant execute permission for rpc_verse_lookup to authenticated users (they can call this)
+GRANT EXECUTE ON FUNCTION rpc_verse_lookup TO authenticated;

@@ -20,6 +20,7 @@ interface AuthContextValue extends AuthState {
   signIn: (email: string, password: string) => Promise<any>;
   signUp: (email: string, password: string, fullName?: string) => Promise<any>;
   signOut: () => Promise<any>;
+  getAccessToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -79,6 +80,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return supabaseClient.auth.signOut();
   }, []);
 
+  const getAccessToken = useCallback(async () => {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return session?.access_token ?? null;
+  }, []);
+
   const value = useMemo(() => ({
     user: state.user,
     loading: state.loading,
@@ -86,7 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signUp,
     signOut,
-  }), [state.user, state.loading, state.isAuthenticated, signIn, signUp, signOut]);
+    getAccessToken,
+  }), [state.user, state.loading, state.isAuthenticated, signIn, signUp, signOut, getAccessToken]);
 
   return (
     <AuthContext.Provider value={value}>
