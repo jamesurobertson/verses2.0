@@ -471,21 +471,8 @@ export const dataService = {
       const todayUTC = new Date().toISOString().split('T')[0];
       
       await db.transaction('rw', db.review_logs, async (tx) => {
-        // Check for existing review today within transaction
-        const existingReview = await tx.review_logs
-          .where(['verse_card_id', 'user_id'])
-          .equals([verseCardId, userId])
-          .filter(log => {
-            const logDate = new Date(log.created_at).toISOString().split('T')[0];
-            return logDate === todayUTC;
-          })
-          .first();
-
-        if (existingReview) {
-          throw new Error('Review already recorded for today');
-        }
-
-        // Create review log within transaction
+        // Create review log within transaction - allow multiple reviews per day
+        // The database trigger (process_review_comprehensive) handles count_toward_progress logic
         const now = new Date().toISOString();
         const logData: LocalDBSchema['review_logs'] = {
           id: crypto.randomUUID(),
@@ -851,6 +838,116 @@ export const dataService = {
     // TODO: Merge with remote data (for now, just return local)
     // This would involve fetching from Supabase and merging based on timestamps
     return results;
+  },
+
+  /**
+   * Archives a verse card (soft delete) with dual-write strategy
+   * ✅ FIXED: Transaction contains only Dexie operations, external calls outside
+   */
+  async archiveVerse(
+    verseCardId: string,
+    userId: string
+  ): Promise<DualWriteResult<LocalDBSchema['verse_cards']>> {
+    const result: DualWriteResult<LocalDBSchema['verse_cards']> = {
+      local: null,
+      remote: null,
+      errors: {},
+      success: false
+    };
+
+    try {
+      // Step 1: Archive verse card locally in transaction
+      let archivedCard: LocalDBSchema['verse_cards'];
+      
+      await db.transaction('rw', db.verse_cards, async (tx) => {
+        const card = await tx.verse_cards.get(verseCardId);
+        if (!card) {
+          throw new Error('Verse card not found');
+        }
+
+        if (card.user_id !== userId) {
+          throw new Error('Unauthorized: cannot archive another user\'s verse');
+        }
+
+        const now = new Date().toISOString();
+        const updateData = {
+          archived: true,
+          updated_at: now
+        };
+
+        await tx.verse_cards.update(verseCardId, updateData);
+        archivedCard = { ...card, ...updateData };
+      });
+
+      result.local = archivedCard!;
+
+      // Step 2: Sync to remote (graceful degradation on failure) - OUTSIDE transaction
+      try {
+        // Get local references for remote sync
+        const localCard = await db.verse_cards.get(verseCardId);
+        if (localCard) {
+          const localVerse = await db.verses.get(localCard.verse_id);
+          if (localVerse) {
+            // Find remote verse by reference+translation
+            const { data: remoteVerses, error: verseSelectError } = await supabaseClient
+              .from('verses')
+              .select('id')
+              .eq('reference', localVerse.reference)
+              .eq('translation', localVerse.translation);
+
+            if (verseSelectError) {
+              throw verseSelectError;
+            }
+
+            if (remoteVerses && remoteVerses.length > 0) {
+              const remoteVerse = remoteVerses[0];
+              // Find remote card by user_id + verse_id
+              const { data: remoteCards, error: cardSelectError } = await supabaseClient
+                .from('verse_cards')
+                .select('id')
+                .eq('user_id', userId)
+                .eq('verse_id', remoteVerse.id);
+
+              if (cardSelectError) {
+                throw cardSelectError;
+              }
+
+              const remoteCard = remoteCards && remoteCards.length > 0 ? remoteCards[0] : null;
+
+              if (remoteCard) {
+                // Archive card remotely
+                const { error: archiveError } = await supabaseClient
+                  .from('verse_cards')
+                  .update({ 
+                    archived: true,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', remoteCard.id);
+
+                if (archiveError) {
+                  throw archiveError;
+                }
+                console.log('Verse archived in remote database successfully');
+              }
+            }
+          }
+        }
+        result.remote = null; // We don't return the remote card object
+      } catch (error) {
+        result.errors.remote = new NetworkError(
+          'Failed to sync archive to remote database - verse archived locally',
+          error as Error
+        );
+        // Don't throw here - local operation succeeded
+      }
+
+      result.success = true;
+      return result;
+
+    } catch (error) {
+      result.errors.local = error as Error;
+      throw new Error(`Failed to archive verse: ${(error as Error).message}`);
+    }
   }
 };
 
