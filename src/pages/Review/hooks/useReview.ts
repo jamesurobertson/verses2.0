@@ -218,7 +218,6 @@ export function useReview(): UseReviewReturn {
       startTime: new Date()
     });
   }, [session]);
-
   /**
    * Marks the current card as correct and advances session
    */

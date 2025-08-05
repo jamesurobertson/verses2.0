@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from "../../contexts/AuthContext";
 import { useReview } from './hooks/useReview';
 import { ReviewCard } from './components/ReviewCard';
+import { useEffect } from 'react';
 
 export function Review() {
   const navigate = useNavigate();
@@ -37,6 +38,10 @@ export function Review() {
     // Navigate back to library after session
     navigate('/library');
   };
+
+  useEffect(() => {
+    startReview();
+  }, [startReview]);
 
   // Authentication required
   if (!isAuthenticated) {
@@ -139,13 +144,6 @@ export function Review() {
         {!sessionActive && dueCards.length > 0 && (
           <div className="text-center">
             <div className="bg-background rounded-lg shadow-sm border border-primary/10 p-8 mb-6">
-              <div className="text-4xl mb-4">📚</div>
-              <h2 className="text-xl font-semibold text-primary mb-4">
-                Ready to review {dueCards.length} verse{dueCards.length !== 1 ? 's' : ''}?
-              </h2>
-              <p className="text-primary/70 mb-6">
-                Try to recite each verse from memory, then check your answer.
-              </p>
               <button 
                 onClick={handleStartSession}
                 className="w-full sm:w-auto px-8 py-4 bg-accent text-black rounded-lg font-medium text-lg hover:bg-accent/90 transition-colors"
