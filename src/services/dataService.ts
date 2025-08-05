@@ -471,21 +471,8 @@ export const dataService = {
       const todayUTC = new Date().toISOString().split('T')[0];
       
       await db.transaction('rw', db.review_logs, async (tx) => {
-        // Check for existing review today within transaction
-        const existingReview = await tx.review_logs
-          .where(['verse_card_id', 'user_id'])
-          .equals([verseCardId, userId])
-          .filter(log => {
-            const logDate = new Date(log.created_at).toISOString().split('T')[0];
-            return logDate === todayUTC;
-          })
-          .first();
-
-        if (existingReview) {
-          throw new Error('Review already recorded for today');
-        }
-
-        // Create review log within transaction
+        // Create review log within transaction - allow multiple reviews per day
+        // The database trigger (process_review_comprehensive) handles count_toward_progress logic
         const now = new Date().toISOString();
         const logData: LocalDBSchema['review_logs'] = {
           id: crypto.randomUUID(),

@@ -4,7 +4,7 @@ import {
   calculateNextDueDate,
   ReviewPhase,
   ReviewResult
-} from '../../src/utils/spacedRepetition';
+} from './spacedRepetition';
 
 describe('calculateNextDueDate', () => {
   test('calculates next due date for daily phase', () => {

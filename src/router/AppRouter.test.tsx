@@ -1,37 +1,40 @@
 // TDD Step 1: RED - Write failing tests FIRST for mobile-first routing
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { AppRouter } from '../../src/router/AppRouter';
-import { useAuth } from '../../src/contexts/AuthContext';
+import { AppRouter } from './AppRouter';
+import { useAuth } from '../contexts/AuthContext';
 
 // Mock the auth hook since we don't have it yet
-jest.mock('../../src/contexts/AuthContext', () => ({
+jest.mock('../contexts/AuthContext', () => ({
   useAuth: jest.fn(() => ({
     user: null,
     loading: false,
+    isAuthenticated: false,
     signIn: jest.fn(),
+    signUp: jest.fn(),
     signOut: jest.fn(),
+    getAccessToken: jest.fn().mockResolvedValue(null),
   })),
 }));
 
 // Mock page components since we don't have them yet
-jest.mock('../../src/pages/Review/Review', () => ({
+jest.mock('../pages/Review/Review', () => ({
   Review: () => <div data-testid="review-page">Review Page</div>,
 }));
 
-jest.mock('../../src/pages/Library/Library', () => ({
+jest.mock('../pages/Library/Library', () => ({
   Library: () => <div data-testid="library-page">Library Page</div>,
 }));
 
-jest.mock('../../src/pages/AddVerse/AddVerse', () => ({
+jest.mock('../pages/AddVerse/AddVerse', () => ({
   AddVerse: () => <div data-testid="add-verse-page">Add Verse Page</div>,
 }));
 
-jest.mock('../../src/pages/Settings/Settings', () => ({
+jest.mock('../pages/Settings/Settings', () => ({
   Settings: () => <div data-testid="settings-page">Settings Page</div>,
 }));
 
-jest.mock('../../src/pages/Auth/Auth', () => ({
+jest.mock('../pages/Auth/Auth', () => ({
   Auth: () => <div data-testid="auth-page">Authentication Page</div>,
 }));
 
@@ -77,6 +80,7 @@ describe('AppRouter (TDD)', () => {
         signIn: jest.fn(),
         signUp: jest.fn(),
         signOut: jest.fn(),
+        getAccessToken: jest.fn().mockResolvedValue('mock-token'),
       });
     });
 
@@ -158,6 +162,7 @@ describe('AppRouter (TDD)', () => {
         signIn: jest.fn(),
         signUp: jest.fn(),
         signOut: jest.fn(),
+        getAccessToken: jest.fn().mockResolvedValue('mock-token'),
       });
     });
 
@@ -198,6 +203,7 @@ describe('AppRouter (TDD)', () => {
         signIn: jest.fn(),
         signUp: jest.fn(),
         signOut: jest.fn(),
+        getAccessToken: jest.fn().mockResolvedValue(null),
       });
 
       render(
@@ -220,6 +226,7 @@ describe('AppRouter (TDD)', () => {
         signIn: jest.fn(),
         signUp: jest.fn(),
         signOut: jest.fn(),
+        getAccessToken: jest.fn().mockResolvedValue(null),
       });
 
       const protectedRoutes = ['/review', '/library', '/add', '/settings'];

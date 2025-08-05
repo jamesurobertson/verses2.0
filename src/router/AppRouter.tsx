@@ -7,6 +7,7 @@ import { AddVerse } from '../pages/AddVerse/AddVerse';
 import { Settings } from '../pages/Settings/Settings';
 import { Auth } from '../pages/Auth/Auth';
 import { NotFound } from '../pages/NotFound/NotFound';
+import { VerseDetails } from '../pages/VerseDetails/VerseDetails';
 import Spinner from '../components/Spinner/Spinner';
 
 /**
@@ -44,6 +45,9 @@ export function AppRouter() {
           <Route path="/library" element={<Library />} />
           <Route path="/add" element={<AddVerse />} />
           <Route path="/settings" element={<Settings />} />
+          
+          {/* Verse details route */}
+          <Route path="/verse/:verseCardId" element={<VerseDetails />} />
 
           {/* 404 page */}
           <Route path="*" element={<NotFound />} />

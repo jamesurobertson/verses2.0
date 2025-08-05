@@ -6,14 +6,14 @@
 
 import { renderHook, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { useAddVerse } from '../../../src/pages/AddVerse/hooks/useAddVerse';
+import { useAddVerse } from './useAddVerse';
 
 // Mock dependencies
-jest.mock('../../../src/contexts/AuthContext', () => ({
+jest.mock('../../../contexts/AuthContext', () => ({
   useAuth: jest.fn(),
 }));
 
-jest.mock('../../../src/services/dataService', () => ({
+jest.mock('../../../services/dataService', () => ({
   dataService: {
     addVerse: jest.fn(),
   },
@@ -39,15 +39,15 @@ jest.mock('../../../src/services/dataService', () => ({
   },
 }));
 
-jest.mock('../../../src/utils/bibleRefParser', () => ({
+jest.mock('../../../utils/bibleRefParser', () => ({
   validateBibleReference: jest.fn(),
   parseBibleReference: jest.fn(),
 }));
 
 // Import mocked modules
-import { useAuth } from '../../../src/contexts/AuthContext';
-import { dataService, DuplicateVerseError, ValidationError } from '../../../src/services/dataService';
-import { validateBibleReference, parseBibleReference } from '../../../src/utils/bibleRefParser';
+import { useAuth } from '../../../contexts/AuthContext';
+import { dataService, DuplicateVerseError, ValidationError } from '../../../services/dataService';
+import { validateBibleReference, parseBibleReference } from '../../../utils/bibleRefParser';
 
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 const mockDataService = dataService as jest.Mocked<typeof dataService>;

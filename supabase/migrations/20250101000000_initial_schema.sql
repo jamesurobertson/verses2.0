@@ -113,10 +113,10 @@ CREATE INDEX idx_review_logs_user_id ON review_logs(user_id);
 CREATE INDEX idx_review_logs_verse_card_id ON review_logs(verse_card_id);
 CREATE INDEX idx_review_logs_created_at ON review_logs(created_at);
 
--- Prevent duplicate reviews per card per day (race condition protection)
--- Note: This uses UTC dates, but business logic should also use UTC for consistency
-CREATE UNIQUE INDEX idx_one_review_per_card_per_day 
-    ON review_logs(verse_card_id, user_id, date(created_at AT TIME ZONE 'UTC'));
+-- Allow multiple reviews per card per day - removed unique constraint
+-- The process_review_comprehensive() trigger handles count_toward_progress logic
+-- CREATE UNIQUE INDEX idx_one_review_per_card_per_day 
+--     ON review_logs(verse_card_id, user_id, date(created_at AT TIME ZONE 'UTC'));
 
 CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
 CREATE INDEX idx_user_profiles_email ON user_profiles(email);

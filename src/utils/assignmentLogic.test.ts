@@ -4,7 +4,7 @@
  */
 
 // Mock the dateUtils module before importing the assignment logic
-jest.mock('../../src/utils/dateUtils', () => ({
+jest.mock('./dateUtils', () => ({
   calculateUserDateValues: jest.fn(() => ({
     userToday: new Date('2024-01-15'),
     userDayOfWeek: 1, // Sunday
@@ -21,7 +21,7 @@ import {
   explainCardDueStatus,
   type LibraryVerseCard,
   type AssignmentCalculation 
-} from '../../src/utils/assignmentLogic';
+} from './assignmentLogic';
 
 // Mock card data for testing
 const createMockCard = (

@@ -2,7 +2,8 @@
  * Auth Provider
  * 
  * Single source of truth for authentication state management.
- * Provides authentication context throughout the app.
+ * Supports local-only mode, anonymous users, and full authentication.
+ * Provides seamless transition between modes.
  */
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
@@ -10,17 +11,42 @@ import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabaseClient } from '../services/supabase';
 
+// Local user ID for offline-first usage
+const LOCAL_USER_ID_KEY = 'verses_local_user_id';
+
+// Generate or retrieve local user ID
+function getOrCreateLocalUserId(): string {
+  let localUserId = localStorage.getItem(LOCAL_USER_ID_KEY);
+  if (!localUserId) {
+    localUserId = crypto.randomUUID();
+    localStorage.setItem(LOCAL_USER_ID_KEY, localUserId);
+  }
+  return localUserId;
+}
+
+type AuthMode = 'local' | 'anonymous' | 'authenticated';
+
 interface AuthState {
   user: User | null;
   loading: boolean;
   isAuthenticated: boolean;
+  mode: AuthMode;
+  localUserId: string;
 }
 
 interface AuthContextValue extends AuthState {
+  // Original methods (still supported)
   signIn: (email: string, password: string) => Promise<any>;
   signUp: (email: string, password: string, fullName?: string) => Promise<any>;
   signOut: () => Promise<any>;
   getAccessToken: () => Promise<string | null>;
+  
+  // New methods for local-first architecture
+  signInAnonymously: () => Promise<any>;
+  convertAnonymousToUser: (email: string, password: string, fullName?: string) => Promise<any>;
+  getCurrentUserId: () => string; // Returns appropriate user ID based on mode
+  isLocalOnly: boolean;
+  isAnonymous: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -30,6 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
     loading: true,
     isAuthenticated: false,
+    mode: 'local',
+    localUserId: getOrCreateLocalUserId(),
   });
 
   useEffect(() => {

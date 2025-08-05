@@ -4,14 +4,14 @@
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { dataService, DuplicateVerseError, ValidationError } from '../../src/services/dataService';
-import { db } from '../../src/services/localDb';
-import { supabaseClient } from '../../src/services/supabase';
-import { esvApi } from '../../src/services/esvApi';
+import { dataService, DuplicateVerseError, ValidationError } from './dataService';
+import { db } from './localDb';
+import { supabaseClient } from './supabase';
+import { esvApi } from './esvApi';
 
 // Mock external dependencies
-jest.mock('../../src/services/supabase');
-jest.mock('../../src/services/esvApi');
+jest.mock('./supabase');
+jest.mock('./esvApi');
 
 const mockUserId = 'test-user-123';
 const mockReference = 'jn 3:16';

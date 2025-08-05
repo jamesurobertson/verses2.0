@@ -5,7 +5,7 @@ import {
   validateBibleReference,
   normalizeBookName,
   ParsedReference
-} from '../../src/utils/bibleRefParser';
+} from './bibleRefParser';
 
 describe('Bible Reference Parser (TDD)', () => {
   // These functions don't exist yet - this should fail!

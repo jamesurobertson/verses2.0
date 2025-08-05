@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { BrowserRouter } from 'react-router-dom';
-import { AddVerse } from '../../../src/pages/AddVerse/AddVerse';
+import { AddVerse } from './AddVerse';
 
 // Mock the useAddVerse hook
 const mockUseAddVerse = {
@@ -26,7 +26,7 @@ const mockUseAddVerse = {
   clearSuccess: jest.fn(),
 };
 
-jest.mock('../../../src/pages/AddVerse/hooks/useAddVerse', () => ({
+jest.mock('./hooks/useAddVerse', () => ({
   useAddVerse: () => mockUseAddVerse,
 }));
 

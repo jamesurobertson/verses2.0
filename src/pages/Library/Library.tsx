@@ -4,6 +4,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLibrary, type LibraryVerseCard } from './hooks/useLibrary';
 
 // Biblical books organized by testament
@@ -74,6 +75,7 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
 };
 
 export function Library() {
+  const navigate = useNavigate();
   const { verses, loading, error, refreshLibrary, clearError } = useLibrary();
   const [activeTestament, setActiveTestament] = useState<'Old Testament' | 'New Testament'>('New Testament');
   const [expandedBooks, setExpandedBooks] = useState<Set<string>>(new Set());
@@ -81,10 +83,9 @@ export function Library() {
   // Group verses by testament and book
   const groupedVerses = useMemo(() => groupVersesByTestament(verses), [verses]);
 
-  // Handle verse click for future detail view
+  // Handle verse click to navigate to detail view
   const handleVerseClick = (card: LibraryVerseCard) => {
-    // TODO: Navigate to verse detail view
-    console.log('Verse clicked:', card.verse.reference);
+    navigate(`/verse/${card.id}`);
   };
 
   // Toggle book expansion
