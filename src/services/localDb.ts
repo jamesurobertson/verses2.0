@@ -1,5 +1,6 @@
 import { Dexie, type EntityTable } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
+import type { QueuedSyncOperation } from './dataService';
 
 // Local database schema with UUID string IDs
 export interface LocalDBSchema {
@@ -61,6 +62,8 @@ export interface LocalDBSchema {
     created_at: string;            // ISO timestamp
   };
 
+  sync_queue: QueuedSyncOperation; // Persistent queue for batch operations
+
 }
 
 // Typed Dexie database with EntityTable
@@ -70,6 +73,7 @@ const db = new Dexie('VersesDB') as Dexie & {
   aliases: EntityTable<LocalDBSchema['aliases'], 'id'>;
   verse_cards: EntityTable<LocalDBSchema['verse_cards'], 'id'>;
   review_logs: EntityTable<LocalDBSchema['review_logs'], 'id'>;
+  syncQueue: EntityTable<LocalDBSchema['sync_queue'], 'id'>;
 };
 
 
@@ -95,6 +99,16 @@ db.version(12).stores({
   return tx.table('verses').toCollection().modify(verse => {
     verse.is_verified = true;
   });
+})
+
+// Version 13: Add sync_queue table for batch operations
+db.version(13).stores({
+  user_profiles: 'id, user_id, timezone, [user_id]',
+  verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
+  verses: 'id, reference, translation, is_verified, [reference+translation]',
+  aliases: 'id, alias, verse_id, [alias], [verse_id]',
+  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]',
+  syncQueue: 'id, userId, type, status, queuedAt, [userId+type], [status]'
 })
 
 // Database hooks for auto-timestamps, UUIDs, and validation
@@ -169,6 +183,13 @@ db.user_profiles.hook('creating', function (_primKey, obj, _trans) {
 db.user_profiles.hook('updating', function (modifications, _primKey, _obj, _trans) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (modifications as any).updated_at = new Date().toISOString();
+});
+
+db.syncQueue.hook('creating', function (_primKey, obj, _trans) {
+  obj.id = obj.id || uuidv4();
+  obj.queuedAt = obj.queuedAt || new Date().toISOString();
+  obj.status = obj.status || 'pending';
+  obj.retryCount = obj.retryCount || 0;
 });
 
 // Database helper functions for common operations
@@ -412,14 +433,109 @@ export const localDb = {
     }
   },
 
+  // Sync queue operations
+  syncQueue: {
+    async add(operation: Omit<QueuedSyncOperation, 'id'>) {
+      const operationData: QueuedSyncOperation = {
+        ...operation,
+        id: uuidv4()
+      };
+
+      await db.syncQueue.add(operationData);
+      return operationData;
+    },
+
+    async getByStatus(status: QueuedSyncOperation['status']) {
+      return db.syncQueue.where('status').equals(status).toArray();
+    },
+
+    async getByUser(userId: string) {
+      return db.syncQueue.where('userId').equals(userId).toArray();
+    },
+
+    async updateStatus(id: string, status: QueuedSyncOperation['status'], retryCount?: number) {
+      const updates: Partial<QueuedSyncOperation> = { status };
+      if (retryCount !== undefined) {
+        updates.retryCount = retryCount;
+      }
+      return db.syncQueue.update(id, updates);
+    },
+
+    async remove(id: string) {
+      return db.syncQueue.delete(id);
+    },
+
+    async clear() {
+      return db.syncQueue.clear();
+    },
+
+    async getPending() {
+      return this.getByStatus('pending');
+    }
+  },
+
+  // Batch helper functions
+  batch: {
+    async getUnverifiedVersesByUser(userId: string, limit = 50): Promise<LocalDBSchema['verses'][]> {
+      // Get verse cards for user
+      const cards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived)
+        .limit(limit)
+        .toArray();
+
+      // Get unverified verses for those cards
+      const unverifiedVerses = [];
+      for (const card of cards) {
+        const verse = await db.verses.get(card.verse_id);
+        if (verse && !verse.is_verified) {
+          unverifiedVerses.push(verse);
+        }
+      }
+      return unverifiedVerses;
+    },
+
+    async markVersesBatchAsVerified(verseIds: string[]): Promise<void> {
+      await db.transaction('rw', db.verses, async (tx) => {
+        for (const id of verseIds) {
+          await tx.verses.update(id, { 
+            is_verified: true, 
+            updated_at: new Date().toISOString() 
+          });
+        }
+      });
+    },
+
+    async getCardsByPhase(userId: string, phase: 'daily' | 'weekly' | 'biweekly' | 'monthly'): Promise<LocalDBSchema['verse_cards'][]> {
+      return db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived && card.current_phase === phase)
+        .toArray();
+    },
+
+    async updateCardsBatch(updates: Array<{ id: string; updates: Partial<LocalDBSchema['verse_cards']> }>): Promise<void> {
+      await db.transaction('rw', db.verse_cards, async (tx) => {
+        for (const { id, updates: cardUpdates } of updates) {
+          await tx.verse_cards.update(id, {
+            ...cardUpdates,
+            updated_at: new Date().toISOString()
+          });
+        }
+      });
+    }
+  },
+
   // Utility functions
   async clear() {
-    await db.transaction('rw', [db.user_profiles, db.verses, db.aliases, db.verse_cards, db.review_logs], async () => {
+    await db.transaction('rw', [db.user_profiles, db.verses, db.aliases, db.verse_cards, db.review_logs, db.syncQueue], async () => {
       await db.user_profiles.clear();
       await db.verses.clear();
       await db.aliases.clear();
       await db.verse_cards.clear();
       await db.review_logs.clear();
+      await db.syncQueue.clear();
     });
   },
 

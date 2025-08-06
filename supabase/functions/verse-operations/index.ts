@@ -6,10 +6,17 @@ import { corsHeaders } from '../_shared/cors.ts';
 
 // Types
 interface VerseOperationRequest {
-  operation: 'lookup' | 'create';
+  operation: 'lookup' | 'create' | 'batch';
   reference: string;
   normalizedRef?: string;
   translation?: string;
+  // Batch operation fields
+  batchId?: string;
+  operations?: Array<{
+    id: string;
+    type: 'lookup' | 'create';
+    data: any;
+  }>;
 }
 
 interface ESVPassageResponse {
@@ -246,6 +253,62 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
   throw new Error('Invalid operation');
 }
 
+// Batch operations handler
+async function handleBatchOperations(operations: Array<{id: string, type: 'lookup' | 'create', data: any}>, userId: string, userToken: string) {
+  const results = [];
+  
+  console.log(`🚀 Processing batch with ${operations.length} operations for user ${userId}`);
+  
+  for (const op of operations) {
+    try {
+      console.log(`📝 Processing operation ${op.id}: ${op.type}`);
+      
+      // Convert batch operation to individual VerseOperationRequest
+      const individualRequest: VerseOperationRequest = {
+        operation: op.type,
+        reference: op.data.reference || '',
+        normalizedRef: op.data.normalizedRef,
+        translation: op.data.translation || 'ESV'
+      };
+      
+      // Process individual operation using existing handler
+      const result = await handleVerseOperation(individualRequest, userId, userToken);
+      
+      results.push({ 
+        id: op.id, 
+        success: true, 
+        data: result 
+      });
+      
+      console.log(`✅ Operation ${op.id} completed successfully`);
+      
+    } catch (error) {
+      console.error(`❌ Operation ${op.id} failed:`, error);
+      
+      results.push({ 
+        id: op.id, 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+  
+  // Calculate summary statistics
+  const successful = results.filter(r => r.success).length;
+  const failed = results.length - successful;
+  
+  console.log(`📊 Batch completed: ${successful} successful, ${failed} failed`);
+  
+  return {
+    results,
+    summary: {
+      total: operations.length,
+      successful,
+      failed
+    }
+  };
+}
+
 // Edge Function Handler
 serve(async (req) => {
   // Handle CORS preflight - THIS MUST BE FIRST!
@@ -310,16 +373,42 @@ serve(async (req) => {
     }
 
     // Validate operation type
-    if (!['lookup', 'create'].includes(requestData.operation)) {
+    if (!['lookup', 'create', 'batch'].includes(requestData.operation)) {
       return new Response(JSON.stringify({ 
-        error: 'Operation must be "lookup" or "create"' 
+        error: 'Operation must be "lookup", "create", or "batch"' 
       }), { 
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Handle the operation with authenticated user ID from JWT
+    // Handle batch operations separately
+    if (requestData.operation === 'batch') {
+      if (!requestData.operations || !Array.isArray(requestData.operations)) {
+        return new Response(JSON.stringify({ 
+          error: 'Batch operation requires operations array' 
+        }), { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const batchResult = await handleBatchOperations(
+        requestData.operations,
+        user.id, // Use authenticated user ID from JWT - secure
+        token // Use token from Authorization header - secure
+      );
+
+      return new Response(JSON.stringify({
+        batchId: requestData.batchId || crypto.randomUUID(),
+        ...batchResult
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Handle individual operations with authenticated user ID from JWT
     // Use user.id from verified JWT token - never trust client-sent userId
     const result = await handleVerseOperation(
       requestData,

@@ -26,7 +26,7 @@ export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
   // Check if we're ready to sync (auth complete + DB ready)
   const isReadyToSync = user && !loading && dbReadyRef.current;
 
-  // Perform sync operation
+  // Perform sync operation with intelligent batching
   const performSync = async () => {
     if (!isReadyToSync) {
       console.log('Background sync skipped - not ready', { 
@@ -38,26 +38,41 @@ export function useBackgroundSync(options: BackgroundSyncOptions = {}) {
     }
 
     try {
-      console.log('sync starting...');
-      const result = await dataService.sync(user.id, lastSyncRef.current || undefined);
+      console.log('🔄 Intelligent sync starting...');
+      const result = await dataService.intelligentSync(user.id, lastSyncRef.current || undefined);
       
-      // Update last sync timestamp for next incremental sync
-      lastSyncRef.current = result.lastSyncTimestamp;
-      
-      // Log results
-      const totalSynced = result.toRemote.synced + result.fromRemote.synced;
-      const totalFailed = result.toRemote.failed + result.fromRemote.failed;
-      
-      if (totalSynced > 0) {
-        console.log(`Background sync completed: ${totalSynced} items synced`);
-      }
-      
-      if (totalFailed > 0) {
-        console.warn(`Background sync issues: ${totalFailed} items failed`);
-      }
-      
-      if (totalFailed === 0 && totalSynced === 0) {
-        console.log('Background sync completed: no changes to sync');
+      // Handle different result types (batch vs individual)
+      if ('batchId' in result) {
+        // Batch result
+        const batchResult = result;
+        lastSyncRef.current = new Date().toISOString(); // Update timestamp for batch operations
+        
+        console.log(`🚀 Batch sync completed: ${batchResult.summary.successful} successful, ${batchResult.summary.failed} failed`);
+        
+        if (batchResult.summary.failed > 0) {
+          console.warn(`Background batch sync issues: ${batchResult.summary.failed} operations failed`);
+        }
+        
+      } else {
+        // Individual sync result
+        const individualResult = result;
+        lastSyncRef.current = individualResult.lastSyncTimestamp;
+        
+        // Log results
+        const totalSynced = individualResult.toRemote.synced + individualResult.fromRemote.synced;
+        const totalFailed = individualResult.toRemote.failed + individualResult.fromRemote.failed;
+        
+        if (totalSynced > 0) {
+          console.log(`📱 Individual sync completed: ${totalSynced} items synced`);
+        }
+        
+        if (totalFailed > 0) {
+          console.warn(`Background sync issues: ${totalFailed} items failed`);
+        }
+        
+        if (totalFailed === 0 && totalSynced === 0) {
+          console.log('📊 Background sync completed: no changes to sync');
+        }
       }
       
     } catch (error) {

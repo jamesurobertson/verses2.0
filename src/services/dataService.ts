@@ -2,6 +2,7 @@ import { db, type LocalDBSchema } from './localDb';
 import { supabaseClient, db as supabaseDb } from './supabase';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
 import { getTodayString } from '../utils/dateUtils';
+import { BatchSyncService, shouldUseBatchSync } from './batchSyncService';
 
 // Dual-write operation result interface
 export interface DualWriteResult<T> {
@@ -41,6 +42,51 @@ export class ValidationError extends Error {
     this.name = 'ValidationError';
   }
 }
+
+// Batch sync interfaces and queue
+export interface QueuedSyncOperation {
+  id: string;                    // UUID for correlation  
+  type: 'create_verse' | 'record_review' | 'update_profile';
+  data: any;                    // Operation payload
+  localRef: string;             // Local database reference
+  userId: string;               // User context
+  queuedAt: string;            // ISO timestamp
+  retryCount: number;          // Retry tracking
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+}
+
+export interface BatchConfig {
+  maxBatchSize: number;        // Default: 10 operations
+  batchTimeoutMs: number;      // Default: 3000ms
+  maxRetries: number;          // Default: 3 attempts
+  networkAwareThrottling: boolean; // Adjust based on connection quality
+}
+
+export interface BatchDualWriteResult {
+  batchId: string;
+  operations: Array<{
+    localId: string;
+    operation: QueuedSyncOperation;
+    result: DualWriteResult<any>;
+  }>;
+  summary: {
+    total: number;
+    successful: number;
+    failed: number;
+    networkErrors: number;
+    validationErrors: number;
+  };
+  processingTimeMs: number;
+}
+
+// Global batch sync state (exported for batch service)
+export let syncQueue: QueuedSyncOperation[] = [];
+export const batchConfig: BatchConfig = {
+  maxBatchSize: 10,
+  batchTimeoutMs: 3000,
+  maxRetries: 3,
+  networkAwareThrottling: true
+};
 
 // Secure verse operations using edge functions
 async function secureVerseOperation(operation: 'lookup' | 'create', reference: string, normalizedRef: string, accessToken?: string): Promise<{
@@ -1151,6 +1197,71 @@ export const dataService = {
       result.errors.local = error as Error;
       throw new Error(`Failed to archive verse: ${(error as Error).message}`);
     }
+  },
+
+  /**
+   * Intelligent sync that decides between individual and batch operations
+   * Based on queue size and network quality
+   */
+  async intelligentSync(
+    userId: string, 
+    lastSyncTimestamp?: string
+  ): Promise<BatchDualWriteResult | ReturnType<typeof dataService.sync>> {
+    // Check current queue status
+    const queueStatus = BatchSyncService.getQueueStatus();
+    const userOperations = queueStatus.operations.filter(op => op.userId === userId);
+    
+    console.log(`🧠 Intelligent sync: ${userOperations.length} queued operations for user`);
+    
+    // Decide whether to use batch or individual sync
+    const useBatch = await shouldUseBatchSync(userOperations.length);
+    
+    if (useBatch && userOperations.length > 0) {
+      try {
+        console.log(`🚀 Using batch sync for ${userOperations.length} operations`);
+        const batchResult = await BatchSyncService.processBatchQueue();
+        
+        // Also run individual sync to catch any non-queued changes
+        if (lastSyncTimestamp) {
+          const individualResult = await this.sync(userId, lastSyncTimestamp);
+          console.log(`📊 Individual sync completed: ${individualResult.toRemote.synced + individualResult.fromRemote.synced} records`);
+        }
+        
+        return batchResult;
+      } catch (error) {
+        console.warn('Batch sync failed, falling back to individual sync:', error);
+        return await this.sync(userId, lastSyncTimestamp);
+      }
+    } else {
+      console.log(`📱 Using individual sync (queue size: ${userOperations.length})`);
+      return await this.sync(userId, lastSyncTimestamp);
+    }
+  },
+
+  /**
+   * Queues an operation for batch processing instead of immediate sync
+   */
+  async queueSyncOperation(
+    type: QueuedSyncOperation['type'],
+    data: any,
+    localRef: string,
+    userId: string
+  ): Promise<void> {
+    return BatchSyncService.queueOperation(type, data, localRef, userId);
+  },
+
+  /**
+   * Forces immediate processing of the sync queue
+   */
+  async flushSyncQueue(): Promise<BatchDualWriteResult> {
+    return BatchSyncService.flushQueue();
+  },
+
+  /**
+   * Gets the current sync queue status for debugging/monitoring
+   */
+  getSyncQueueStatus() {
+    return BatchSyncService.getQueueStatus();
   }
 };
 
