@@ -1,12 +1,12 @@
 -- Bible Memory App - Complete Database Schema
 -- This migration creates the complete database schema in one file
 
--- Drop existing tables and functions if they exist
+-- Drop existing tables and functions if they exist (PRESERVE VERSES AND ALIASES TABLES)
 DROP TABLE IF EXISTS review_logs CASCADE;
 DROP TABLE IF EXISTS verse_cards CASCADE;
-DROP TABLE IF EXISTS aliases CASCADE;
+-- DROP TABLE IF EXISTS aliases CASCADE; -- COMMENTED OUT - Keep existing aliases to preserve reference mappings
 DROP TABLE IF EXISTS user_profiles CASCADE;
-DROP TABLE IF EXISTS verses CASCADE;
+-- DROP TABLE IF EXISTS verses CASCADE; -- COMMENTED OUT - Keep existing verses to avoid wasting ESV API calls
 DROP VIEW IF EXISTS due_cards_view CASCADE;
 DROP FUNCTION IF EXISTS create_user_profile() CASCADE;
 DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
@@ -17,8 +17,8 @@ DROP FUNCTION IF EXISTS calculate_next_assigned_date() CASCADE;
 DROP FUNCTION IF EXISTS process_review_comprehensive() CASCADE;
 DROP FUNCTION IF EXISTS create_review_log_for_verse_card() CASCADE;
 
--- Verses Table
-CREATE TABLE public.verses (
+-- Verses Table (preserve existing verses)
+CREATE TABLE IF NOT EXISTS public.verses (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     reference text NOT NULL,
     text text NOT NULL,
@@ -31,8 +31,8 @@ CREATE TABLE public.verses (
 -- Enable RLS
 ALTER TABLE public.verses ENABLE ROW LEVEL SECURITY;
 
--- Aliases Table
-CREATE TABLE public.aliases (
+-- Aliases Table (preserve existing aliases)
+CREATE TABLE IF NOT EXISTS public.aliases (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     alias text UNIQUE NOT NULL,
     verse_id uuid NOT NULL REFERENCES public.verses(id) ON DELETE CASCADE,

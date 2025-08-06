@@ -4,14 +4,12 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from "../../contexts/AuthContext";
 import { useReview } from './hooks/useReview';
 import { ReviewCard } from './components/ReviewCard';
 import { useEffect } from 'react';
 
 export function Review() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
   const { 
     dueCards, 
     todaysCards,
@@ -43,20 +41,6 @@ export function Review() {
     startReview();
   }, [startReview]);
 
-  // Authentication required
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-lg mx-auto text-center">
-          <h1 className="text-2xl font-bold text-primary mb-4">Review</h1>
-          <div className="bg-background border border-primary/10 rounded-lg p-6 shadow-sm">
-            <h3 className="text-primary font-medium mb-2">Sign in required</h3>
-            <p className="text-primary/70">Please sign in to review your verses.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // Error state
   if (error) {

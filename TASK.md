@@ -7,9 +7,10 @@
     - determine the best way to handle supabase in this situation. Should it make an account without an email? Is that possible and then if they make an account it does it? Think HARD about this. This will likely change how we are using AuthProvider and useAuth throughout the app.
 
 ### Medium Priority
+= if a verse is out of range, ie. user inputs john 3 99, should return an error to user instead of making the last verse in that chapter and creating an alias for it. this could cause a malicious user to pollute alias db with infinite number of bad data. should we hardcode last verse number of each book or let esv api handle it?
 
 ### Low Priority 
-- Batch requests for syncing. 
+- Batch requests for syncing, can we cache as well so multiple refreshes do not sync all of your verses if its already confirmed that it is synced? how can we do this?
 - move /tests into folder next to where the file/component is. i.e: every pages/AddVerse directory has AddVerse.tsx, Addverse.test.tsx, etc.
 
 ### Backlog

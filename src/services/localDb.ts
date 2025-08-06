@@ -20,6 +20,8 @@ export interface LocalDBSchema {
     reference: string;    // "John 3:16" (canonical ESV format)
     text: string;         // ESV verse text
     translation: string;  // "ESV"
+    is_verified: boolean; // false for manually entered verses that need ESV validation
+    validation_error?: string; // ESV validation error message (if any)
     created_at: string;   // ISO timestamp
     updated_at: string;   // ISO timestamp
   };
@@ -81,6 +83,20 @@ db.version(11).stores({
   review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]'
 })
 
+// Version 12: Add is_verified field to verses
+db.version(12).stores({
+  user_profiles: 'id, user_id, timezone, [user_id]',
+  verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
+  verses: 'id, reference, translation, is_verified, [reference+translation]',
+  aliases: 'id, alias, verse_id, [alias], [verse_id]',
+  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]'
+}).upgrade(tx => {
+  // Set existing verses as verified (they came from ESV API originally)
+  return tx.table('verses').toCollection().modify(verse => {
+    verse.is_verified = true;
+  });
+})
+
 // Database hooks for auto-timestamps, UUIDs, and validation
 db.verses.hook('creating', function (_primKey, obj, _trans) {
   const now = new Date().toISOString();
@@ -88,6 +104,7 @@ db.verses.hook('creating', function (_primKey, obj, _trans) {
   obj.created_at = now;
   obj.updated_at = now;
   obj.translation = obj.translation || 'ESV';
+  obj.is_verified = obj.is_verified !== undefined ? obj.is_verified : true; // Default to verified
 });
 
 db.aliases.hook('creating', function (_primKey, obj, _trans) {

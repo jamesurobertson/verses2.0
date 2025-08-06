@@ -19,6 +19,7 @@ export interface LibraryVerseCard {
     reference: string;
     text: string;
     translation: string;
+    validationError?: string; // ESV validation error (if any)
   };
   currentPhase: 'daily' | 'weekly' | 'biweekly' | 'monthly';
   nextDueDate: string;
@@ -43,7 +44,7 @@ interface UseLibraryReturn {
 }
 
 export function useLibrary(): UseLibraryReturn {
-  const { user } = useAuth();
+  const { getCurrentUserId } = useAuth();
   const { timezone } = useTimezone();
   const [verses, setVerses] = useState<LibraryVerseCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +67,8 @@ export function useLibrary(): UseLibraryReturn {
               id: verse.id!,
               reference: verse.reference,
               text: verse.text,
-              translation: verse.translation
+              translation: verse.translation,
+              validationError: verse.validation_error // Include validation error info
             },
             currentPhase: card.current_phase,
             nextDueDate: card.next_due_date,
@@ -82,7 +84,15 @@ export function useLibrary(): UseLibraryReturn {
         }
       }
 
-      return libraryCards.sort((a, b) => new Date(b.verse.reference).getTime() - new Date(a.verse.reference).getTime());
+      // Sort: invalid verses at top, then by reference
+      return libraryCards.sort((a, b) => {
+        // Invalid verses first
+        if (a.verse.validationError && !b.verse.validationError) return -1;
+        if (!a.verse.validationError && b.verse.validationError) return 1;
+        
+        // Then sort by reference alphabetically
+        return a.verse.reference.localeCompare(b.verse.reference);
+      });
     } catch (error) {
       console.error('Failed to load local verses:', error);
       return [];
@@ -93,22 +103,17 @@ export function useLibrary(): UseLibraryReturn {
    * Refreshes the verse library from local storage
    */
   const refreshLibrary = useCallback(async () => {
-    if (!user) {
-      setVerses([]);
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
       // Load from local database (primary source)
-      const localVerses = await loadLocalVerses(user.id);
+      const userId = getCurrentUserId();
+      const localVerses = await loadLocalVerses(userId);
       setVerses(localVerses);
 
       // TODO: In the future, we could merge with remote data here
-      // const remoteVerses = await dataService.getUserVerses(user.id);
+      // const remoteVerses = await dataService.getUserVerses(userId);
       // const mergedVerses = mergeLocalAndRemote(localVerses, remoteVerses);
       // setVerses(mergedVerses);
 
@@ -119,7 +124,7 @@ export function useLibrary(): UseLibraryReturn {
     } finally {
       setLoading(false);
     }
-  }, [user, loadLocalVerses]);
+  }, [getCurrentUserId, loadLocalVerses]);
 
   /**
    * Clears error state

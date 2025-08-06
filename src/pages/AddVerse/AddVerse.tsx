@@ -12,16 +12,20 @@ export function AddVerse() {
   const navigate = useNavigate();
   const {
     reference,
+    verseText,
     isLoading,
     isValidating,
     validationError,
     error,
     success,
+    showManualEntry,
     setReference,
+    setVerseText,
     validateReference,
     addVerse,
     clearError,
-    clearSuccess
+    clearSuccess,
+    retryWithESV
   } = useAddVerse();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,7 +35,8 @@ export function AddVerse() {
       return;
     }
 
-    await addVerse(reference);
+    // Pass manual text if in manual entry mode
+    await addVerse(reference, showManualEntry ? verseText : undefined);
   };
 
   const handleAddAnother = () => {
@@ -100,10 +105,39 @@ export function AddVerse() {
                     disabled={isLoading}
                     isValidating={isValidating}
                     validationError={validationError}
+                    showManualEntry={showManualEntry}
                     placeholder="John 3:16"
                     data-testid="verse-reference-input"
                   />
                 </div>
+
+                {/* Manual text input when offline */}
+                {showManualEntry && (
+                  <div>
+                    <label htmlFor="verseText" className="block font-medium text-primary text-lg mb-3">
+                      Verse Text
+                      <span className="text-sm text-gray-500 font-normal ml-2">(Offline mode)</span>
+                    </label>
+                    <textarea
+                      id="verseText"
+                      value={verseText}
+                      onChange={(e) => setVerseText(e.target.value)}
+                      disabled={isLoading}
+                      placeholder="Enter the verse text manually..."
+                      className="w-full py-4 px-4 border border-primary/20 rounded-lg bg-background text-primary placeholder-primary/50 focus:ring-2 focus:ring-accent focus:border-transparent transition-colors min-h-[120px] resize-none"
+                      data-testid="verse-text-input"
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                      <button
+                        type="button"
+                        onClick={retryWithESV}
+                        className="text-sm text-accent hover:text-accent/80 font-medium"
+                      >
+                        Try ESV API again
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Error display */}
                 {error && (
@@ -129,7 +163,12 @@ export function AddVerse() {
           <div className="w-full max-w-md mx-auto mt-8">
             <button
               type="submit"
-              disabled={isLoading || !reference.trim() || !!validationError}
+              disabled={
+                isLoading || 
+                !reference.trim() || 
+                !!validationError ||
+                (showManualEntry && !verseText.trim())
+              }
               onClick={handleSubmit}
               className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed font-medium py-4 px-6 rounded-lg text-base transition-colors shadow-sm"
             >

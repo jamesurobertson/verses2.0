@@ -46,7 +46,7 @@ interface UseReviewReturn {
 }
 
 export function useReview(): UseReviewReturn {
-  const { user } = useAuth();
+  const { getCurrentUserId, getAccessToken, isLocalOnly } = useAuth();
   const { timezone } = useTimezone();
   const [dueCards, setDueCards] = useState<LibraryVerseCard[]>([]);
   const [todaysCards, setTodaysCards] = useState<LibraryVerseCard[]>([]);
@@ -108,7 +108,7 @@ export function useReview(): UseReviewReturn {
 
       for (const card of allUserCards) {
         const verse = await localDb.verses.findById(card.verse_id);
-        if (verse) {
+        if (verse && !verse.validation_error) { // Exclude verses with validation errors from review
           libraryCards.push({
             id: card.id!,
             verse: {
@@ -144,20 +144,14 @@ export function useReview(): UseReviewReturn {
    * Refreshes the due cards list
    */
   const refreshDueCards = useCallback(async () => {
-    if (!user) {
-      setDueCards([]);
-      setTodaysCards([]);
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
+      const userId = getCurrentUserId();
       const [dueCardsData, todaysCardsData] = await Promise.all([
-        loadDueCards(user.id),
-        loadTodaysCards(user.id)
+        loadDueCards(userId),
+        loadTodaysCards(userId)
       ]);
 
       setDueCards(dueCardsData);
@@ -169,7 +163,7 @@ export function useReview(): UseReviewReturn {
     } finally {
       setLoading(false);
     }
-  }, [user, loadDueCards, loadTodaysCards]);
+  }, [getCurrentUserId, loadDueCards, loadTodaysCards]);
 
   /**
    * Starts a new review session
@@ -222,18 +216,22 @@ export function useReview(): UseReviewReturn {
    * Marks the current card as correct and advances session
    */
   const markCardCorrect = useCallback(async () => {
-    if (!session || !user) return;
+    if (!session) return;
 
     const currentCard = session.cards[session.currentIndex];
     if (!currentCard) return;
 
     try {
+      const userId = getCurrentUserId();
+      const accessToken = isLocalOnly ? undefined : await getAccessToken();
+
       // Record the review result
       await dataService.recordReview(
         currentCard.id,
-        user.id,
+        userId,
         true, // was successful
-        undefined // review time - could be calculated
+        undefined, // review time - could be calculated
+        accessToken || undefined
       );
 
       // Update session state
@@ -256,24 +254,28 @@ export function useReview(): UseReviewReturn {
       console.error('Failed to mark card correct:', error);
       setError('Failed to record review result');
     }
-  }, [session, user, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken, isLocalOnly, refreshDueCards]);
 
   /**
    * Marks the current card as incorrect and advances session
    */
   const markCardIncorrect = useCallback(async () => {
-    if (!session || !user) return;
+    if (!session) return;
 
     const currentCard = session.cards[session.currentIndex];
     if (!currentCard) return;
 
     try {
+      const userId = getCurrentUserId();
+      const accessToken = isLocalOnly ? undefined : await getAccessToken();
+
       // Record the review result
       await dataService.recordReview(
         currentCard.id,
-        user.id,
+        userId,
         false, // was not successful
-        undefined // review time - could be calculated
+        undefined, // review time - could be calculated
+        accessToken || undefined
       );
 
       // Update session state
@@ -297,7 +299,7 @@ export function useReview(): UseReviewReturn {
       console.error('Failed to mark card incorrect:', error);
       setError('Failed to record review result');
     }
-  }, [session, user, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken, isLocalOnly, refreshDueCards]);
 
   /**
    * Ends the current review session
@@ -323,13 +325,12 @@ export function useReview(): UseReviewReturn {
     }
   }, []);
 
-  // Load due cards when user changes
+  // Load due cards when hook initializes
   useEffect(() => {
     refreshDueCards();
-    if (user) {
-      loadReferenceDisplayMode(user.id);
-    }
-  }, [refreshDueCards]);
+    const userId = getCurrentUserId();
+    loadReferenceDisplayMode(userId);
+  }, [refreshDueCards, getCurrentUserId, loadReferenceDisplayMode]);
 
   // Calculate derived values
   const sessionActive = session !== null;

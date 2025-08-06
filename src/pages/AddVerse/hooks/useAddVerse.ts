@@ -14,6 +14,7 @@ import type { LocalDBSchema } from '../../../services/localDb';
 // Form state interface
 export interface AddVerseFormState {
   reference: string;
+  verseText: string; // For manual text entry when offline
   isValidating: boolean;
   validationError: string | null;
   isLoading: boolean;
@@ -24,29 +25,34 @@ export interface AddVerseFormState {
     verse: LocalDBSchema['verses'];
     verseCard: LocalDBSchema['verse_cards'];
   } | null;
+  showManualEntry: boolean; // Show manual text entry when offline
 }
 
 // Hook return interface
 interface UseAddVerseReturn extends AddVerseFormState {
   setReference: (reference: string) => void;
+  setVerseText: (text: string) => void;
   validateReference: (reference: string) => Promise<boolean>;
-  addVerse: (reference: string) => Promise<void>;
+  addVerse: (reference: string, manualText?: string) => Promise<void>;
   clearState: () => void;
   clearError: () => void;
   clearSuccess: () => void;
+  retryWithESV: () => void; // Retry ESV API call
 }
 
 export function useAddVerse(): UseAddVerseReturn {
-  const { user, getAccessToken } = useAuth();
+  const { getCurrentUserId, getAccessToken } = useAuth();
   
   // Form state management
   const [state, setState] = useState<AddVerseFormState>({
     reference: '',
+    verseText: '',
     isValidating: false,
     validationError: null,
     isLoading: false,
     error: null,
-    success: null
+    success: null,
+    showManualEntry: false
   });
 
   // Debounced validation timer
@@ -60,6 +66,17 @@ export function useAddVerse(): UseAddVerseReturn {
       ...prev,
       reference,
       validationError: null,
+      error: null
+    }));
+  }, []);
+
+  /**
+   * Updates the verse text input value (for local-only mode)
+   */
+  const setVerseText = useCallback((verseText: string) => {
+    setState(prev => ({
+      ...prev,
+      verseText,
       error: null
     }));
   }, []);
@@ -120,7 +137,7 @@ export function useAddVerse(): UseAddVerseReturn {
             }));
             resolve(false);
           }
-        }, 800);
+        }, 300);
 
         setValidationTimer(timer);
       });
@@ -135,21 +152,22 @@ export function useAddVerse(): UseAddVerseReturn {
   }, [validationTimer]);
 
   /**
-   * Adds a verse using the dual-write data service
+   * Adds a verse - tries ESV API first, falls back to manual entry if network fails
    */
-  const addVerse = useCallback(async (reference: string) => {
-    if (!user) {
-      setState(prev => ({
-        ...prev,
-        error: 'You must be logged in to add verses'
-      }));
-      return;
-    }
-
+  const addVerse = useCallback(async (reference: string, manualText?: string) => {
     if (!reference.trim()) {
       setState(prev => ({
         ...prev,
         error: 'Please enter a Bible reference'
+      }));
+      return;
+    }
+
+    // If showing manual entry, require text
+    if (state.showManualEntry && (!manualText || !manualText.trim())) {
+      setState(prev => ({
+        ...prev,
+        error: 'Please enter the verse text'
       }));
       return;
     }
@@ -180,51 +198,105 @@ export function useAddVerse(): UseAddVerseReturn {
         return;
       }
 
-      // Show immediate success without verse text
-      setState(prev => ({
-        ...prev,
-        success: {
-          reference: reference,
-          text: '', // Empty initially - will load in background
-          verse: null as any,
-          verseCard: null as any
-        }
-      }));
-
-      // Get access token for secure API calls
+      // Get current user ID and access token
+      const userId = getCurrentUserId();
       const accessToken = await getAccessToken();
-      console.log('🔑 Access token retrieved:', accessToken ? 'Token found' : 'No token');
-      if (!accessToken) {
-        // Clear optimistic state on error
-        setState(prev => ({ ...prev, success: null }));
-        throw new Error('Unable to authenticate request');
-      }
+      console.log('🔑 Access token:', accessToken ? 'Found' : 'None');
 
-      // Add verse using data service - ESV API will handle parsing and formatting
-      const result = await dataService.addVerse(reference, user.id, accessToken);
+      // Try to add verse using ESV API first (if not already in manual mode)
+      if (!state.showManualEntry) {
+        try {
+          const result = await dataService.addVerse(reference, userId, accessToken || undefined);
 
-      if (result.success && result.local) {
-        // Success - update with actual verse data (but user already saw success)
-        setState(prev => ({
-          ...prev,
-          isLoading: false,
-          error: null,
-          success: {
-            reference: result.local!.verse.reference,
-            text: result.local!.verse.text,
-            verse: result.local!.verse,
-            verseCard: result.local!.verseCard
-          },
-          reference: '' // Clear form
-        }));
+          if (result.success && result.local) {
+            // Success - update with actual verse data
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              error: null,
+              success: {
+                reference: result.local!.verse.reference,
+                text: result.local!.verse.text,
+                verse: result.local!.verse,
+                verseCard: result.local!.verseCard
+              },
+              reference: '', // Clear form
+              verseText: '', // Clear manual text
+              showManualEntry: false // Reset manual entry mode
+            }));
 
-        // Log sync warning if remote failed
-        if (result.errors.remote) {
-          console.warn('Verse saved locally but failed to sync to remote:', result.errors.remote);
+            // Log sync warning if remote failed
+            if (result.errors.remote) {
+              console.warn('Verse saved locally but failed to sync to remote:', result.errors.remote);
+            }
+            return;
+          }
+        } catch (networkError) {
+          // Check if this is a network-related error
+          const isNetworkError = networkError instanceof NetworkError || 
+                                (networkError instanceof Error && 
+                                 (networkError.message.includes('network') || 
+                                  networkError.message.includes('fetch') ||
+                                  networkError.message.includes('Failed to fetch') ||
+                                  networkError.message.includes('timeout') ||
+                                  networkError.message.includes('Request timed out') ||
+                                  networkError.message.includes('offline') ||
+                                  networkError.message.includes('AbortError') ||
+                                  networkError.message.includes('NetworkError') ||
+                                  // HTTP error status codes that indicate connectivity issues
+                                  networkError.message.includes('500') ||
+                                  networkError.message.includes('502') ||
+                                  networkError.message.includes('503') ||
+                                  networkError.message.includes('504')));
+
+          if (isNetworkError) {
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              showManualEntry: true,
+              error: 'Unable to connect to ESV API. Please enter the verse text manually.'
+            }));
+            return;
+          } else {
+            // Re-throw non-network errors
+            throw networkError;
+          }
         }
       } else {
-        throw new Error('Failed to save verse');
+        // Manual entry mode - validate text before saving
+        if (!manualText || manualText.trim() === '') {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: 'Please enter the verse text'
+          }));
+          return;
+        }
+
+        // Manual entry mode - save with provided text
+        const userId = getCurrentUserId();
+        const result = await dataService.addVerse(reference, userId, undefined, manualText.trim());
+
+        if (result.success && result.local) {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: null,
+            success: {
+              reference: result.local!.verse.reference,
+              text: result.local!.verse.text,
+              verse: result.local!.verse,
+              verseCard: result.local!.verseCard
+            },
+            reference: '', // Clear form
+            verseText: '', // Clear manual text
+            showManualEntry: false // Reset manual entry mode
+          }));
+          return;
+        }
       }
+
+      throw new Error('Failed to save verse');
     } catch (error) {
       let errorMessage = 'An unexpected error occurred';
 
@@ -241,10 +313,23 @@ export function useAddVerse(): UseAddVerseReturn {
       setState(prev => ({
         ...prev,
         isLoading: false,
-        error: errorMessage
+        error: errorMessage,
+        success: null // Clear optimistic success on error
       }));
     }
-  }, [user, validateReference]);
+  }, [getCurrentUserId, getAccessToken, state.isLoading, state.showManualEntry]);
+
+  /**
+   * Retry with ESV API (exit manual entry mode)
+   */
+  const retryWithESV = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      showManualEntry: false,
+      error: null,
+      verseText: '' // Clear manual text when switching back
+    }));
+  }, []);
 
   /**
    * Clears all form state
@@ -252,11 +337,13 @@ export function useAddVerse(): UseAddVerseReturn {
   const clearState = useCallback(() => {
     setState({
       reference: '',
+      verseText: '',
       isValidating: false,
       validationError: null,
       isLoading: false,
       error: null,
-      success: null
+      success: null,
+      showManualEntry: false
     });
   }, []);
 
@@ -292,10 +379,12 @@ export function useAddVerse(): UseAddVerseReturn {
   return {
     ...state,
     setReference,
+    setVerseText,
     validateReference,
     addVerse,
     clearState,
     clearError,
-    clearSuccess
+    clearSuccess,
+    retryWithESV
   };
 }
