@@ -3,11 +3,13 @@
  * Users can manage preferences, account settings, and app behavior.
  * Supports local-only, anonymous, and authenticated modes.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from "../../contexts/AuthContext";
+import { dataService } from "../../services/dataService";
+import { db } from "../../services/localDb";
 
 export function Settings() {
-  const { user, signOut, convertAnonymousToUser, isAnonymous } = useAuth();
+  const { user, signOut, convertAnonymousToUser, isAnonymous, getCurrentUserId } = useAuth();
   const [referenceDisplayMode, setReferenceDisplayMode] = useState('first');
   const [showAccountCreation, setShowAccountCreation] = useState(false);
   const [email, setEmail] = useState('');
@@ -16,6 +18,76 @@ export function Settings() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
+  
+  // Profile management state
+  const [profileData, setProfileData] = useState({
+    email: '',
+    fullName: '',
+    timezone: 'UTC',
+    preferredTranslation: 'ESV',
+    referenceDisplayMode: 'full'
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Load current profile
+  useEffect(() => {
+    loadProfile();
+  }, [user]);
+
+  const loadProfile = async () => {
+    try {
+      const userId = await getCurrentUserId();
+      const profile = await db.user_profiles.where('user_id').equals(userId).first();
+      
+      if (profile) {
+        setProfileData({
+          email: profile.email || '',
+          fullName: profile.full_name || '',
+          timezone: profile.timezone || 'UTC',
+          preferredTranslation: profile.preferred_translation || 'ESV',
+          referenceDisplayMode: profile.reference_display_mode || 'full'
+        });
+        setReferenceDisplayMode(profile.reference_display_mode || 'full');
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+    }
+  };
+
+  const updateProfileField = (field: string, value: string) => {
+    setProfileData(prev => ({ ...prev, [field]: value }));
+    setHasUnsavedChanges(true);
+    setProfileSuccess(false);
+  };
+
+  const saveProfile = async () => {
+    if (!hasUnsavedChanges) return;
+
+    setProfileLoading(true);
+    try {
+      const userId = await getCurrentUserId();
+      await dataService.updateUserProfile(userId, {
+        email: profileData.email || null,
+        full_name: profileData.fullName || null,
+        timezone: profileData.timezone,
+        preferred_translation: profileData.preferredTranslation,
+        reference_display_mode: profileData.referenceDisplayMode
+      });
+      
+      setHasUnsavedChanges(false);
+      setProfileSuccess(true);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setProfileSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to save profile:', error);
+      // Could add error state here
+    } finally {
+      setProfileLoading(false);
+    }
+  };
 
   const handleSignOut = async () => {
     try {
@@ -221,7 +293,117 @@ export function Settings() {
           )}
         </div>
 
-        {/* Display Preferences */}
+        {/* Profile Management - Only show for authenticated users */}
+        {!isAnonymous && (
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-primary font-roboto">Profile</h2>
+              {hasUnsavedChanges && (
+                <button
+                  onClick={saveProfile}
+                  disabled={profileLoading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {profileLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              )}
+            </div>
+
+            {profileSuccess && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-green-600 text-sm">✅ Profile updated successfully!</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {/* Email */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={profileData.email}
+                  onChange={(e) => updateProfileField('email', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="your@email.com"
+                />
+              </div>
+
+              {/* Full Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={profileData.fullName}
+                  onChange={(e) => updateProfileField('fullName', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Your name"
+                />
+              </div>
+
+              {/* Timezone */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Timezone
+                </label>
+                <select
+                  value={profileData.timezone}
+                  onChange={(e) => updateProfileField('timezone', e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="UTC">UTC</option>
+                  <option value="America/New_York">Eastern Time (New York)</option>
+                  <option value="America/Chicago">Central Time (Chicago)</option>
+                  <option value="America/Denver">Mountain Time (Denver)</option>
+                  <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+                  <option value="Europe/London">London</option>
+                  <option value="Europe/Paris">Paris</option>
+                  <option value="Asia/Tokyo">Tokyo</option>
+                  <option value="Australia/Sydney">Sydney</option>
+                </select>
+              </div>
+
+              {/* Translation Preference */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Preferred Translation
+                </label>
+                <select
+                  value={profileData.preferredTranslation}
+                  onChange={(e) => updateProfileField('preferredTranslation', e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="ESV">ESV (English Standard Version)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">More translations coming soon</p>
+              </div>
+
+              {/* Reference Display Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reference Display Mode
+                </label>
+                <select
+                  value={profileData.referenceDisplayMode}
+                  onChange={(e) => {
+                    updateProfileField('referenceDisplayMode', e.target.value);
+                    setReferenceDisplayMode(e.target.value);
+                  }}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="full">Full Text</option>
+                  <option value="first">First Letter ( J__ tap to reveal )</option>
+                  <option value="blank">Blank ( ___ tap to reveal )</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Display Preferences - For anonymous users or fallback */}
         <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
           <h2 className="text-lg font-medium text-primary mb-4 font-roboto">Display</h2>
 
@@ -233,7 +415,12 @@ export function Settings() {
               </label>
               <select
                 value={referenceDisplayMode}
-                onChange={(e) => setReferenceDisplayMode(e.target.value)}
+                onChange={(e) => {
+                  setReferenceDisplayMode(e.target.value);
+                  if (!isAnonymous) {
+                    updateProfileField('referenceDisplayMode', e.target.value);
+                  }
+                }}
                 className="w-full bg-background border border-gray-200 rounded-lg px-4 py-3 text-primary font-roboto focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               >
                 <option value="full">Full Text</option>

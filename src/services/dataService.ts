@@ -1262,6 +1262,70 @@ export const dataService = {
    */
   getSyncQueueStatus() {
     return BatchSyncService.getQueueStatus();
+  },
+
+  /**
+   * Updates user profile with dual-write pattern
+   */
+  async updateUserProfile(
+    userId: string,
+    updates: Partial<LocalDBSchema['user_profiles']>,
+    accessToken?: string
+  ): Promise<DualWriteResult<LocalDBSchema['user_profiles']>> {
+    const result: DualWriteResult<LocalDBSchema['user_profiles']> = {
+      local: null,
+      remote: null,
+      errors: {},
+      success: false
+    };
+
+    try {
+      // Step 1: Update locally first (optimistic UI)
+      let updatedProfile: LocalDBSchema['user_profiles'];
+      
+      await db.transaction('rw', db.user_profiles, async (tx) => {
+        const existing = await tx.user_profiles.where('user_id').equals(userId).first();
+        if (!existing) {
+          throw new Error('User profile not found');
+        }
+
+        const updateData = {
+          ...updates,
+          updated_at: new Date().toISOString()
+        };
+
+        await tx.user_profiles.update(existing.id!, updateData);
+        updatedProfile = { ...existing, ...updateData };
+      });
+
+      result.local = updatedProfile!;
+
+      // Step 2: Sync to remote (graceful degradation)
+      if (accessToken) {
+        try {
+          const { data: remoteProfile, error: remoteError } = await supabaseClient
+            .from('user_profiles')
+            .update(updates)
+            .eq('user_id', userId)
+            .select()
+            .single();
+
+          if (remoteError) throw remoteError;
+          result.remote = remoteProfile;
+        } catch (error) {
+          result.errors.remote = new NetworkError(
+            'Failed to sync profile to remote - changes saved locally',
+            error as Error
+          );
+        }
+      }
+
+      result.success = true;
+      return result;
+    } catch (error) {
+      result.errors.local = error as Error;
+      throw error;
+    }
   }
 };
 
