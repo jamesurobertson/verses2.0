@@ -1,9 +1,11 @@
 import { db } from './localDb';
 import { supabaseClient } from './supabase';
-import { 
+import type { 
   QueuedSyncOperation, 
   BatchDualWriteResult, 
-  DualWriteResult, 
+  DualWriteResult
+} from './dataService';
+import { 
   NetworkError, 
   ValidationError,
   batchConfig,
@@ -298,7 +300,7 @@ export class BatchSyncService {
    */
   private static async updateLocalRecordForOperation(
     operation: QueuedSyncOperation,
-    result: DualWriteResult<any>
+    _result: DualWriteResult<any>
   ): Promise<void> {
     switch (operation.type) {
       case 'create_verse':

@@ -96,7 +96,9 @@ async function secureVerseOperation(operation: 'lookup' | 'create', reference: s
   source?: string;
 }> {
   try {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseUrl = process.env.NODE_ENV === 'test' 
+      ? process.env.VITE_SUPABASE_URL 
+      : import.meta.env.VITE_SUPABASE_URL;
     
     // Use provided access token or get from session
     let token = accessToken;
@@ -208,7 +210,7 @@ async function cachedVerseOperation(operation: 'lookup' | 'create', reference: s
 }
 
 // Unified data service for dual-write operations
-export const dataService = {
+export const dataService: any = {
   /**
    * Adds a new verse with local-first approach:
    * 1. Check local database (verses + aliases table)
@@ -398,7 +400,7 @@ export const dataService = {
         isDuplicateVerseError: error instanceof DuplicateVerseError,
         isValidationError: error instanceof ValidationError,
         isNetworkError: error instanceof NetworkError,
-        constructor: error.constructor.name
+        constructor: (error as Error).constructor.name
       });
       
       if (error instanceof DuplicateVerseError || error instanceof ValidationError || error instanceof NetworkError) {
@@ -766,7 +768,7 @@ export const dataService = {
 
       console.log(`📊 Sync summary: ${finalCardsToSync.length} unverified verses to sync`);
 
-      for (const { card: localCard, verse: localVerse } of finalCardsToSync) {
+      for (const { card: _localCard, verse: localVerse } of finalCardsToSync) {
         try {
           console.log(`🔍 Processing unverified verse: ${localVerse.reference}`);
           
@@ -833,7 +835,7 @@ export const dataService = {
             else {
               console.error(`Failed to validate verse ${localVerse.reference}:`, createError);
               result.failed++;
-              result.errors.push(new Error(`Failed to validate verse ${localVerse.reference}: ${createError.message}`));
+              result.errors.push(new Error(`Failed to validate verse ${localVerse.reference}: ${(createError as Error).message}`));
               continue;
             }
           }
@@ -1311,7 +1313,7 @@ export const dataService = {
             .single();
 
           if (remoteError) throw remoteError;
-          result.remote = remoteProfile;
+          result.remote = remoteProfile as any;
         } catch (error) {
           result.errors.remote = new NetworkError(
             'Failed to sync profile to remote - changes saved locally',

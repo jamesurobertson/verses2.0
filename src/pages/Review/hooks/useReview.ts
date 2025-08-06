@@ -46,7 +46,7 @@ interface UseReviewReturn {
 }
 
 export function useReview(): UseReviewReturn {
-  const { getCurrentUserId, getAccessToken, isLocalOnly } = useAuth();
+  const { getCurrentUserId, getAccessToken } = useAuth();
   const { timezone } = useTimezone();
   const [dueCards, setDueCards] = useState<LibraryVerseCard[]>([]);
   const [todaysCards, setTodaysCards] = useState<LibraryVerseCard[]>([]);
@@ -223,7 +223,7 @@ export function useReview(): UseReviewReturn {
 
     try {
       const userId = getCurrentUserId();
-      const accessToken = isLocalOnly ? undefined : await getAccessToken();
+      const accessToken = await getAccessToken();
 
       // Record the review result
       await dataService.recordReview(
@@ -254,7 +254,7 @@ export function useReview(): UseReviewReturn {
       console.error('Failed to mark card correct:', error);
       setError('Failed to record review result');
     }
-  }, [session, getCurrentUserId, getAccessToken, isLocalOnly, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken, refreshDueCards]);
 
   /**
    * Marks the current card as incorrect and advances session
@@ -267,7 +267,7 @@ export function useReview(): UseReviewReturn {
 
     try {
       const userId = getCurrentUserId();
-      const accessToken = isLocalOnly ? undefined : await getAccessToken();
+      const accessToken = await getAccessToken();
 
       // Record the review result
       await dataService.recordReview(
@@ -299,7 +299,7 @@ export function useReview(): UseReviewReturn {
       console.error('Failed to mark card incorrect:', error);
       setError('Failed to record review result');
     }
-  }, [session, getCurrentUserId, getAccessToken, isLocalOnly, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken, refreshDueCards]);
 
   /**
    * Ends the current review session

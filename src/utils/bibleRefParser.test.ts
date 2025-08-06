@@ -3,8 +3,7 @@ import {
   parseBibleReference, 
   parseMultipleReferences, 
   validateBibleReference,
-  normalizeBookName,
-  ParsedReference
+  normalizeBookName
 } from './bibleRefParser';
 
 describe('Bible Reference Parser (TDD)', () => {
@@ -166,13 +165,13 @@ describe('Bible Reference Parser (TDD)', () => {
       try {
         parseBibleReference('Jon 3:16');
       } catch (error) {
-        expect(error.message).toContain('Did you mean "John"?');
+        expect((error as Error).message).toContain('Did you mean "John"?');
       }
 
       try {
         parseBibleReference('1 John 6:1'); // 1 John only has 5 chapters
       } catch (error) {
-        expect(error.message).toContain('1 John only has 5 chapters');
+        expect((error as Error).message).toContain('1 John only has 5 chapters');
       }
     });
   });

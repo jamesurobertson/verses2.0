@@ -1,9 +1,7 @@
 // TDD Tests for spaced repetition logic
 import {
   processReview,
-  calculateNextDueDate,
-  ReviewPhase,
-  ReviewResult
+  calculateNextDueDate
 } from './spacedRepetition';
 
 describe('calculateNextDueDate', () => {
