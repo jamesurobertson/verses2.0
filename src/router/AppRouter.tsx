@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { useAuth } from "../contexts/AuthContext";
 import { MobileNavigation } from '../components/MobileNavigation/MobileNavigation';
 import { Review } from '../pages/Review/Review';
@@ -7,43 +7,40 @@ import { AddVerse } from '../pages/AddVerse/AddVerse';
 import { Settings } from '../pages/Settings/Settings';
 import { Auth } from '../pages/Auth/Auth';
 import { NotFound } from '../pages/NotFound/NotFound';
+import { VerseDetails } from '../pages/VerseDetails/VerseDetails';
 import Spinner from '../components/Spinner/Spinner';
 
 /**
- * Mobile-first application router with protected routes.
- * Renders bottom navigation for mobile users and handles authentication flow.
+ * Mobile-first application router with optional authentication.
+ * Supports local-only mode, anonymous users, and full authentication.
+ * Renders bottom navigation for mobile users.
  */
 export function AppRouter() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
 
-  // Show loading spinner while checking authentication
+  // Show loading spinner during initial auth check
   if (loading) {
     return <Spinner />
   }
 
-  // If user is not authenticated, show auth page
-  if (!user) {
-    return (
-      <Routes>
-        <Route path="*" element={<Auth />} />
-      </Routes>
-    );
-  }
-
-  // Authenticated user routes with mobile navigation
+  // Always show main app - authentication is now optional
   return (
     <div className="h-screen flex flex-col">
       {/* Main content area */}
       <main className="flex-1 overflow-y-auto" style={{ paddingBottom: '57px' }}>
         <Routes>
-          {/* Default route redirects to review */}
-          <Route path="/" element={<Navigate to="/review" replace />} />
-
-          {/* Main app routes */}
+          {/* Main app routes - available in all modes */}
+          <Route path="/" element={<Review />} />
           <Route path="/review" element={<Review />} />
           <Route path="/library" element={<Library />} />
           <Route path="/add" element={<AddVerse />} />
           <Route path="/settings" element={<Settings />} />
+          
+          {/* Verse details route */}
+          <Route path="/library/:reference" element={<VerseDetails />} />
+
+          {/* Auth route - accessible if needed */}
+          <Route path="/auth" element={<Auth />} />
 
           {/* 404 page */}
           <Route path="*" element={<NotFound />} />

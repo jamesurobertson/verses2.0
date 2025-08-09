@@ -1,7 +1,7 @@
 # Verses 2.0 - Claude Project Bootstrap Guide
 
 ## Quick Start
-When joining a new conversation about this project, read these files first:
+**IMPTANT** When joining a new conversation about this project, read these files first in entirety and confirm to me that you have read each of them:
 1. **THIS FILE** - Complete project context
 2. `TASK.md` - Current active tasks and priorities  
 3. `SUPABASE_CLI_README.md` - Supabase deployment knowledge

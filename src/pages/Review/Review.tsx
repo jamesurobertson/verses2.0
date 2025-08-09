@@ -4,14 +4,13 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from "../../contexts/AuthContext";
 import { useReview } from './hooks/useReview';
 import { ReviewCard } from './components/ReviewCard';
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 export function Review() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
   const { 
     dueCards, 
     todaysCards,
@@ -43,20 +42,6 @@ export function Review() {
     startReview();
   }, [startReview]);
 
-  // Authentication required
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-lg mx-auto text-center">
-          <h1 className="text-2xl font-bold text-primary mb-4">Review</h1>
-          <div className="bg-background border border-primary/10 rounded-lg p-6 shadow-sm">
-            <h3 className="text-primary font-medium mb-2">Sign in required</h3>
-            <p className="text-primary/70">Please sign in to review your verses.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // Error state
   if (error) {
@@ -89,20 +74,21 @@ export function Review() {
   }
 
   return (
-    <div className="bg-background">
-      <div className="p-4 max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary mb-2">Daily Review</h1>
-          {!sessionActive && (
+    <div className="bg-background min-h-screen relative">
+      {/* Use calc to subtract navbar height (80px) from viewport height */}
+      <div style={{ height: 'calc(100vh - 80px)' }} className="flex flex-col overflow-x-visible overflow-y-hidden">
+        {/* Header - compact for full-height cards */}
+        {!sessionActive && (
+          <div className="text-center p-4">
+            <h1 className="text-3xl font-bold text-primary mb-2">Daily Review</h1>
             <p className="text-primary/70 text-lg">
               {dueCards.length === 0 
                 ? "No cards due for review today! Great job!" 
                 : `${dueCards.length} verse${dueCards.length !== 1 ? 's' : ''} ready for review`
               }
             </p>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* No cards due */}
         {!sessionActive && dueCards.length === 0 && (
@@ -161,28 +147,46 @@ export function Review() {
           </div>
         )}
 
-        {/* Active session */}
-        {sessionActive && currentCard && (
-          <div>
-            <ReviewCard
-              verseCard={currentCard}
-              onCorrect={markCardCorrect}
-              onIncorrect={markCardIncorrect}
-              showProgress={true}
-              progress={sessionProgress}
-              referenceDisplayMode={referenceDisplayMode}
-            />
-            
-            {/* Session controls */}
-            <div className="text-center">
+        {/* Full-page review session - Slack-style using Portal */}
+        {sessionActive && currentCard && createPortal(
+          <div className="fixed h-full inset-0 bg-background" style={{ zIndex: 10000 }}>
+            {/* Header with back arrow */}
+            <div className="flex items-center justify-between p-4 border-b border-primary/10">
               <button 
-                onClick={handleSessionComplete}
-                className="text-primary/60 hover:text-primary transition-colors text-sm"
+                onClick={endReview}
+                className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-primary/5 transition-colors"
+                aria-label="Go back"
               >
-                End Session Early
+                <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                </svg>
               </button>
+              <div className="text-center">
+                <p className="text-sm font-medium text-primary">
+                  {sessionProgress.current} of {sessionProgress.total}
+                </p>
+                <p className="text-xs text-primary/60">
+                  {sessionProgress.total - sessionProgress.current} left
+                </p>
+              </div>
+              <div className="w-10 h-10" /> {/* Spacer for centering */}
             </div>
-          </div>
+
+            {/* Full-screen card area */}
+            <div className="flex-1 relative p-4 overflow-visible flex flex-col">
+              <ReviewCard
+                verseCard={currentCard}
+                onCorrect={markCardCorrect}
+                onIncorrect={markCardIncorrect}
+                showProgress={true}
+                progress={sessionProgress}
+                referenceDisplayMode={referenceDisplayMode}
+                remainingCards={sessionProgress.total - sessionProgress.current}
+                upcomingCards={dueCards.slice(sessionProgress.current, sessionProgress.current + 3)}
+              />
+            </div>
+          </div>,
+          document.body
         )}
 
         {/* Session completed automatically when all cards are done */}

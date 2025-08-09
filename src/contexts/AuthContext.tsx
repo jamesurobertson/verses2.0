@@ -2,25 +2,42 @@
  * Auth Provider
  * 
  * Single source of truth for authentication state management.
- * Provides authentication context throughout the app.
+ * Defaults to anonymous users with option to create permanent accounts.
+ * Greenfield approach - no local-only mode needed.
  */
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 import { supabaseClient } from '../services/supabase';
+import { dataService } from '../services/dataService';
+
+type AuthMode = 'anonymous' | 'authenticated';
 
 interface AuthState {
   user: User | null;
   loading: boolean;
   isAuthenticated: boolean;
+  mode: AuthMode;
 }
 
 interface AuthContextValue extends AuthState {
+  // Authentication methods
   signIn: (email: string, password: string) => Promise<any>;
   signUp: (email: string, password: string, fullName?: string) => Promise<any>;
   signOut: () => Promise<any>;
   getAccessToken: () => Promise<string | null>;
+  
+  // Anonymous user methods
+  signInAnonymously: () => Promise<any>;
+  convertAnonymousToUser: (email: string, password: string, fullName?: string) => Promise<any>;
+  getCurrentUserId: () => string; // Returns user ID
+  
+  // Data sync methods
+  syncData: () => Promise<void>; // Manual data sync
+  
+  isAnonymous: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -30,31 +47,203 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
     loading: true,
     isAuthenticated: false,
+    mode: 'anonymous',
   });
 
-  useEffect(() => {
-    // Get initial session
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      setState({
-        user: session?.user ?? null,
-        loading: false,
-        isAuthenticated: !!session?.user,
+  // Helper function to perform anonymous sign-in
+  const performAnonymousSignIn = useCallback(async () => {
+    try {
+      console.log('🔄 Creating anonymous session...');
+      const { data: anonData, error: anonError } = await supabaseClient.auth.signInAnonymously();
+      
+      if (anonError) {
+        console.error('❌ Anonymous sign-in failed:', anonError);
+        throw anonError;
+      }
+      
+      if (!anonData.user) {
+        throw new Error('Anonymous sign-in succeeded but no user returned');
+      }
+      
+      // Anonymous sign-in successful
+      console.log('✅ Anonymous sign-in successful:', {
+        userId: anonData.user.id,
+        isAnonymous: anonData.user.is_anonymous
       });
+      
+      setState(prevState => ({
+        ...prevState,
+        user: anonData.user,
+        loading: false,
+        isAuthenticated: true,
+        mode: 'anonymous',
+      }));
+    } catch (error) {
+      console.error('❌ Failed to initialize anonymous session:', error);
+      
+      // Create a fallback local user if Supabase anonymous auth fails
+      console.log('🔄 Creating fallback local session...');
+      const fallbackUser = {
+        id: `local_${uuidv4()}`,
+        is_anonymous: true,
+        email: null,
+        app_metadata: {},
+        user_metadata: {},
+        aud: 'authenticated',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      } as any;
+      
+      setState(prevState => ({
+        ...prevState,
+        user: fallbackUser,
+        loading: false,
+        isAuthenticated: true,
+        mode: 'anonymous',
+      }));
+      
+      console.log('✅ Fallback local session created:', {
+        userId: fallbackUser.id,
+        isLocal: true
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false; // Flag to prevent double execution in Strict Mode
+    
+    // Get initial session
+    supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
+      console.log('🔄 AuthContext useEffect: session', session);
+      console.log('🔄 User from session:', session?.user ? {
+        id: session.user.id,
+        email: session.user.email,
+        is_anonymous: session.user.is_anonymous,
+        email_confirmed_at: session.user.email_confirmed_at
+      } : null);
+      if (cancelled) return; // Prevent double execution
+      
+      const user = session?.user ?? null;
+      const isAnonymous = user?.is_anonymous ?? false;
+      
+      // If no user exists, sign in anonymously immediately
+      // Let onAuthStateChange handle email verification properly
+      if (!user) {
+        console.log('No existing session found, creating anonymous session...');
+        await performAnonymousSignIn();
+      } else {
+        // User already exists (anonymous or authenticated)
+        setState(prevState => ({
+          ...prevState,
+          user,
+          loading: false,
+          isAuthenticated: !!user,
+          mode: isAnonymous ? 'anonymous' : 'authenticated',
+        }));
+
+        // If user is authenticated (not anonymous), sync data on app startup
+        if (user && !isAnonymous) {
+          console.log('🔄 App startup: syncing data for authenticated user...');
+          try {
+            // First, ensure user profile exists (create if needed)
+            await dataService.ensureUserProfile(user.id);
+            
+            // Then sync any existing profile data from remote
+            await dataService.syncUserProfile(user.id);
+            
+            // Finally sync verse data (bidirectional)
+            console.log('🔄 App startup: syncing verse data from cloud...');
+            const syncResult = await dataService.sync(user.id);
+            console.log('✅ App startup sync completed:', {
+              toRemote: `${syncResult.toRemote.synced} synced, ${syncResult.toRemote.failed} failed`,
+              fromRemote: `${syncResult.fromRemote.synced} synced, ${syncResult.fromRemote.failed} failed`
+            });
+          } catch (error) {
+            console.error('Failed to sync data on app startup:', error);
+          }
+        }
+      }
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
-      (_event, session) => {
-        setState({
-          user: session?.user ?? null,
-          loading: false,
-          isAuthenticated: !!session?.user,
+      async (event, session) => {
+        const user = session?.user ?? null;
+        const isAnonymous = user?.is_anonymous ?? false;
+        
+        console.log('🔄 Auth state change:', { 
+          event, 
+          user: user ? { 
+            id: user.id, 
+            email: user.email, 
+            is_anonymous: user.is_anonymous,
+            email_confirmed_at: user.email_confirmed_at 
+          } : null 
         });
+
+        // Handle email verification and other auth events
+        if (event === 'TOKEN_REFRESHED' && user && !isAnonymous && user.email_confirmed_at) {
+          console.log('✅ Email verification completed, updating user profile...');
+          
+          // Update the user profile to complete email verification
+          try {
+            await dataService.completeEmailVerification(user.id, user.email);
+          } catch (error) {
+            console.error('Failed to complete email verification in profile:', error);
+          }
+        }
+        
+        if (event === 'SIGNED_IN' && user && !isAnonymous) {
+          console.log('✅ User signed in with email/password');
+        }
+        
+        // Only create anonymous user if we've explicitly signed out
+        if (!user && event === 'SIGNED_OUT') {
+          console.log('🔄 User signed out, creating new anonymous session...');
+          await performAnonymousSignIn();
+          return; // Don't update state here, let performAnonymousSignIn handle it
+        }
+        
+        // For email verification completion, don't create anonymous user
+        if (!user && (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
+          console.log('⚠️ Auth state change with no user, but not creating anonymous user due to verification flow');
+          // Let the auth state settle naturally
+        }
+        
+        setState(prevState => ({
+          ...prevState,
+          user,
+          loading: false,
+          isAuthenticated: !!user,
+          mode: user ? (isAnonymous ? 'anonymous' : 'authenticated') : 'anonymous',
+        }));
+
+        // Sync user profile and verse data when user becomes authenticated
+        if (user && !isAnonymous && (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) {
+          console.log('🔄 Syncing user data after authentication...', event);
+          try {
+            // First, ensure user profile exists (create if needed)
+            await dataService.ensureUserProfile(user.id);
+            
+            // Then sync any existing profile data from remote
+            await dataService.syncUserProfile(user.id);
+            
+            // Finally sync verse data (bidirectional)
+            console.log('🔄 Syncing verse data from cloud...');
+            const syncResult = await dataService.sync(user.id);
+            console.log('✅ Verse data sync completed:', {
+              toRemote: `${syncResult.toRemote.synced} synced, ${syncResult.toRemote.failed} failed`,
+              fromRemote: `${syncResult.fromRemote.synced} synced, ${syncResult.fromRemote.failed} failed`
+            });
+          } catch (error) {
+            console.error('Failed to sync user data:', error);
+          }
+        }
       }
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [performAnonymousSignIn]);
 
   const signIn = useCallback((email: string, password: string) => {
     return supabaseClient.auth.signInWithPassword({ email, password });
@@ -76,8 +265,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const signOut = useCallback(() => {
-    return supabaseClient.auth.signOut();
+  const signOut = useCallback(async () => {
+    const result = await supabaseClient.auth.signOut();
+    // After sign out, automatically sign in anonymously again
+    try {
+      const { data: anonData, error: anonError } = await supabaseClient.auth.signInAnonymously();
+      if (!anonError && anonData.user) {
+        setState(prevState => ({
+          ...prevState,
+          user: anonData.user,
+          isAuthenticated: true,
+          mode: 'anonymous',
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to re-authenticate anonymously after sign out:', error);
+      setState(prevState => ({
+        ...prevState,
+        user: null,
+        isAuthenticated: false,
+        mode: 'anonymous',
+      }));
+    }
+    return result;
   }, []);
 
   const getAccessToken = useCallback(async () => {
@@ -85,15 +295,139 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return session?.access_token ?? null;
   }, []);
 
+  // New methods for local-first architecture
+  const signInAnonymously = useCallback(async () => {
+    return supabaseClient.auth.signInAnonymously();
+  }, []);
+
+  const convertAnonymousToUser = useCallback(async (email: string, password: string, fullName?: string) => {
+    if (!state.user || !state.user.is_anonymous) {
+      throw new Error('Can only convert anonymous users');
+    }
+
+    // Detect user's timezone automatically  
+    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const currentAnonymousUserId = state.user.id;
+    
+    console.log('🔄 Converting anonymous user to permanent account...', { 
+      anonymousUserId: currentAnonymousUserId,
+      email 
+    });
+
+    try {
+      // CORRECT APPROACH: Update the existing anonymous user with email/password
+      const result = await supabaseClient.auth.updateUser({
+        email,
+        password,
+        data: {
+          full_name: fullName || email.split('@')[0],
+          timezone: userTimezone
+        }
+      });
+
+      if (result.error) {
+        console.error('❌ Failed to convert anonymous user:', result.error);
+        throw result.error;
+      }
+
+      console.log('✅ Anonymous user converted successfully', {
+        userId: result.data.user?.id,
+        email: result.data.user?.email,
+        sameUserId: result.data.user?.id === currentAnonymousUserId
+      });
+
+      // The user ID should remain the same - just converted from anonymous to authenticated
+      if (result.data.user && result.data.user.id === currentAnonymousUserId) {
+        setState(prevState => ({
+          ...prevState,
+          user: result.data.user,
+          loading: false,
+          isAuthenticated: true,
+          mode: 'authenticated', // Now authenticated with email verification pending
+        }));
+
+        console.log('🔄 Creating/updating user profile after conversion...');
+        try {
+          // Ensure user profile exists with conversion data
+          await dataService.ensureUserProfile(result.data.user.id, {
+            email: result.data.user.email,
+            full_name: fullName,
+            timezone: userTimezone
+          });
+        } catch (error) {
+          console.error('Failed to create/sync user profile after conversion:', error);
+        }
+      } else {
+        console.error('❌ User ID mismatch after conversion - data may be lost!');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ Error during anonymous user conversion:', error);
+      throw error;
+    }
+  }, [state.user]);
+
+  const getCurrentUserId = useCallback(() => {
+    // Return user ID from current session (anonymous or authenticated)
+    return state.user?.id || '';
+  }, [state.user?.id]);
+
+  const syncData = useCallback(async () => {
+    const user = state.user;
+    if (user && !user.is_anonymous) {
+      try {
+        console.log('🔄 Manual data sync requested...');
+        await dataService.syncUserProfile(user.id);
+        const syncResult = await dataService.sync(user.id);
+        console.log('✅ Manual sync completed:', {
+          toRemote: `${syncResult.toRemote.synced} synced, ${syncResult.toRemote.failed} failed`,
+          fromRemote: `${syncResult.fromRemote.synced} synced, ${syncResult.fromRemote.failed} failed`
+        });
+      } catch (error) {
+        console.error('❌ Manual sync failed:', error);
+        throw error;
+      }
+    }
+  }, [state.user]);
+
   const value = useMemo(() => ({
+    // State properties
     user: state.user,
     loading: state.loading,
     isAuthenticated: state.isAuthenticated,
+    mode: state.mode,
+    
+    // Computed properties
+    isAnonymous: state.mode === 'anonymous',
+    
+    // Authentication methods
     signIn,
     signUp,
     signOut,
     getAccessToken,
-  }), [state.user, state.loading, state.isAuthenticated, signIn, signUp, signOut, getAccessToken]);
+    
+    // Anonymous user methods
+    signInAnonymously,
+    convertAnonymousToUser,
+    getCurrentUserId,
+    
+    // Data sync methods
+    syncData,
+  }), [
+    state.user, 
+    state.loading, 
+    state.isAuthenticated, 
+    state.mode,
+    signIn, 
+    signUp, 
+    signOut, 
+    getAccessToken,
+    signInAnonymously,
+    convertAnonymousToUser,
+    getCurrentUserId,
+    syncData
+  ]);
 
   return (
     <AuthContext.Provider value={value}>

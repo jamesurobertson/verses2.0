@@ -8,6 +8,7 @@ export interface VerseReferenceInputProps {
   className?: string;
   placeholder?: string;
   isValidating?: boolean;
+  showManualEntry?: boolean;
   validationError?: string | null;
   'data-testid'?: string;
 }
@@ -21,6 +22,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
   placeholder = 'Enter a Bible reference (e.g., John 3:16)',
   isValidating = false,
   validationError = null,
+  showManualEntry = false,
   'data-testid': testId,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,7 +38,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     onChange(newValue);
-    
+
     // Trigger validation after a brief delay
     if (newValue.trim()) {
       onValidation(newValue);
@@ -58,7 +60,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
   // Dynamic styling based on validation state using design system colors
   const getInputStyles = () => {
     const baseStyles = 'w-full px-4 py-4 text-lg border rounded-lg focus:outline-none focus:ring-2 transition-colors font-roboto bg-white';
-    
+
     if (validationError) {
       return `${baseStyles} border-error focus:border-error focus:ring-error/20 bg-error/5 text-primary`;
     } else if (value.trim() && !isValidating && !validationError) {
@@ -86,7 +88,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
         autoComplete="off"
         spellCheck="false"
       />
-      
+
       {/* Validation indicator */}
       <div className="absolute inset-y-0 right-0 flex items-center pr-4">
         {isValidating && (
@@ -109,18 +111,18 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
           </div>
         )}
       </div>
-      
+
       {/* Error message */}
       {validationError && (
         <p className="mt-3 text-sm text-error font-medium" role="alert">
           {validationError}
         </p>
       )}
-      
+
       {/* Helper text */}
-      {!validationError && (
-        <p className="mt-3 text-sm text-primary/60">
-          Examples: John 3:16, Romans 8:28-30, 1 Corinthians 13:4-7
+      {showManualEntry && (
+        <p className="mt-3 text-sm text-red-800">
+          Connection issue detected. Please check your internet connection or enter the verse text manually.
         </p>
       )}
     </div>

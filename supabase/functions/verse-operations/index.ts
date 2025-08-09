@@ -6,10 +6,17 @@ import { corsHeaders } from '../_shared/cors.ts';
 
 // Types
 interface VerseOperationRequest {
-  operation: 'lookup' | 'create';
+  operation: 'lookup' | 'create' | 'batch';
   reference: string;
   normalizedRef?: string;
   translation?: string;
+  // Batch operation fields
+  batchId?: string;
+  operations?: Array<{
+    id: string;
+    type: 'lookup' | 'create';
+    data: any;
+  }>;
 }
 
 interface ESVPassageResponse {
@@ -40,17 +47,28 @@ function normalizeReferenceForLookup(reference: string): string {
 
 // Direct ESV API call - no intermediate edge function for better performance
 async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
+  console.log('📖 Calling ESV API for reference:', reference);
+  
   const esvApiKey = Deno.env.get('ESV_API_KEY');
   const esvApiBaseUrl = Deno.env.get('ESV_API_BASE_URL') || 'https://api.esv.org/v3';
   
+  console.log('🔑 ESV API configuration:', {
+    hasApiKey: !!esvApiKey,
+    apiKeyLength: esvApiKey?.length || 0,
+    baseUrl: esvApiBaseUrl
+  });
+  
   if (!esvApiKey) {
+    console.error('❌ ESV API key not configured');
     throw new Error('ESV API key not configured');
   }
 
   // Sanitize reference
   const sanitizedReference = reference.replace(/\s+/g, ' ').trim();
+  console.log('🧹 Sanitized reference:', sanitizedReference);
   
   if (!sanitizedReference || sanitizedReference.length > 200) {
+    console.error('❌ Invalid reference format:', { sanitizedReference, length: sanitizedReference?.length });
     throw new Error('Invalid Bible reference format');
   }
 
@@ -63,36 +81,64 @@ async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
     'include-passage-references': 'false'
   });
 
-  const response = await fetch(`${esvApiBaseUrl}/passage/text/?${params.toString()}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Token ${esvApiKey}`,
-      'Accept': 'application/json'
+  const requestUrl = `${esvApiBaseUrl}/passage/text/?${params.toString()}`;
+  console.log('🌐 ESV API request:', { url: requestUrl });
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Token ${esvApiKey}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    console.log('📡 ESV API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+
+    if (!response.ok) {
+      console.error(`❌ ESV API Error: ${response.status} ${response.statusText}`);
+      switch (response.status) {
+        case 400:
+          throw new Error('Invalid Bible reference. Please check the spelling and try again.');
+        case 401:
+          throw new Error('Unable to connect to Bible service.');
+        case 429:
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        default:
+          throw new Error(`Unable to fetch verse. Server error ${response.status}`);
+      }
     }
-  });
 
-  if (!response.ok) {
-    console.error(`ESV API Error: ${response.status}`);
-    switch (response.status) {
-      case 400:
-        throw new Error('Invalid Bible reference. Please check the spelling and try again.');
-      case 401:
-        throw new Error('Unable to connect to Bible service.');
-      case 429:
-        throw new Error('Too many requests. Please wait a moment and try again.');
-      default:
-        throw new Error(`Unable to fetch verse. Server error ${response.status}`);
+    const data = await response.json();
+    console.log('✅ ESV API success:', {
+      hasQuery: !!data.query,
+      hasCanonical: !!data.canonical,
+      passageCount: data.passages?.length || 0,
+      canonical: data.canonical,
+      firstPassageLength: data.passages?.[0]?.length || 0
+    });
+    
+    // Validate response structure
+    if (!data || typeof data !== 'object') {
+      console.error('❌ Invalid ESV API response structure:', data);
+      throw new Error('Invalid response from Bible service');
     }
-  }
 
-  const data = await response.json();
-  
-  // Validate response structure
-  if (!data || typeof data !== 'object') {
-    throw new Error('Invalid response from Bible service');
+    return data as ESVPassageResponse;
+  } catch (error) {
+    console.error('❌ ESV API call failed:', {
+      error,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : 'Unknown',
+      reference: sanitizedReference
+    });
+    throw error;
   }
-
-  return data as ESVPassageResponse;
 }
 
 // ESV API verification function - ensures data integrity
@@ -117,10 +163,19 @@ async function verifyVerseWithESV(reference: string, text: string, translation: 
 
 // Main verse lookup/creation function
 async function handleVerseOperation(request: VerseOperationRequest, userId: string, userToken: string) {
+  console.log('🎯 Starting verse operation:', {
+    operation: request.operation,
+    reference: request.reference,
+    normalizedRef: request.normalizedRef,
+    userId: userId.slice(0, 8) + '...',
+    hasUserToken: !!userToken
+  });
+  
   const { operation, reference, normalizedRef, translation = 'ESV' } = request;
   
   // Step 1: Always try lookup first (both operations need this)
   const normalizedInput = normalizedRef || normalizeReferenceForLookup(reference);
+  console.log('🔍 Performing database lookup with normalized input:', normalizedInput);
   
   const { data: lookupResult, error: lookupError } = await supabase
     .rpc('rpc_verse_lookup', {
@@ -130,7 +185,17 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
       p_translation: translation
     });
 
+  console.log('📊 Database lookup result:', {
+    hasResult: !!lookupResult,
+    hasError: !!lookupError,
+    hasVerse: !!lookupResult?.verse,
+    hasUserCard: !!lookupResult?.user_card,
+    foundViaAlias: lookupResult?.found_via_alias,
+    errorMessage: lookupError?.message
+  });
+
   if (lookupError) {
+    console.error('❌ Database lookup failed:', lookupError);
     throw new Error(`Lookup failed: ${lookupError.message}`);
   }
 
@@ -163,10 +228,11 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
         throw new Error(`Verse "${lookupResult.verse.reference}" already exists in your collection`);
       }
       
+      // Return verse and existing card info - client will handle card creation/unarchiving
       return {
         verse: lookupResult.verse,
         foundViaAlias: lookupResult.found_via_alias,
-        userCard: lookupResult.user_card,
+        userCard: lookupResult.user_card, // Return existing card (may be archived)
         source: 'database'
       };
     }
@@ -235,15 +301,72 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
       }
     }
 
+    // Return just the verse - client will create the verse card
     return {
       verse: createResult,
       foundViaAlias: false,
-      userCard: null,
+      userCard: null, // No card yet - client will create it
       source: 'esv_api'
     };
   }
 
   throw new Error('Invalid operation');
+}
+
+// Batch operations handler
+async function handleBatchOperations(operations: Array<{id: string, type: 'lookup' | 'create', data: any}>, userId: string, userToken: string) {
+  const results = [];
+  
+  console.log(`🚀 Processing batch with ${operations.length} operations for user ${userId}`);
+  
+  for (const op of operations) {
+    try {
+      console.log(`📝 Processing operation ${op.id}: ${op.type}`);
+      
+      // Convert batch operation to individual VerseOperationRequest
+      const individualRequest: VerseOperationRequest = {
+        operation: op.type,
+        reference: op.data.reference || '',
+        normalizedRef: op.data.normalizedRef,
+        translation: op.data.translation || 'ESV'
+      };
+      
+      // Process individual operation using existing handler
+      const result = await handleVerseOperation(individualRequest, userId, userToken);
+      
+      results.push({ 
+        id: op.id, 
+        success: true, 
+        data: result 
+      });
+      
+      console.log(`✅ Operation ${op.id} completed successfully`);
+      
+    } catch (error) {
+      console.error(`❌ Operation ${op.id} failed:`, error);
+      
+      results.push({ 
+        id: op.id, 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+  
+  // Calculate summary statistics
+  const successful = results.filter(r => r.success).length;
+  const failed = results.length - successful;
+  
+  console.log(`📊 Batch completed: ${successful} successful, ${failed} failed`);
+  
+  return {
+    results,
+    summary: {
+      total: operations.length,
+      successful,
+      failed
+    }
+  };
 }
 
 // Edge Function Handler
@@ -310,16 +433,42 @@ serve(async (req) => {
     }
 
     // Validate operation type
-    if (!['lookup', 'create'].includes(requestData.operation)) {
+    if (!['lookup', 'create', 'batch'].includes(requestData.operation)) {
       return new Response(JSON.stringify({ 
-        error: 'Operation must be "lookup" or "create"' 
+        error: 'Operation must be "lookup", "create", or "batch"' 
       }), { 
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Handle the operation with authenticated user ID from JWT
+    // Handle batch operations separately
+    if (requestData.operation === 'batch') {
+      if (!requestData.operations || !Array.isArray(requestData.operations)) {
+        return new Response(JSON.stringify({ 
+          error: 'Batch operation requires operations array' 
+        }), { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const batchResult = await handleBatchOperations(
+        requestData.operations,
+        user.id, // Use authenticated user ID from JWT - secure
+        token // Use token from Authorization header - secure
+      );
+
+      return new Response(JSON.stringify({
+        batchId: requestData.batchId || crypto.randomUUID(),
+        ...batchResult
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Handle individual operations with authenticated user ID from JWT
     // Use user.id from verified JWT token - never trust client-sent userId
     const result = await handleVerseOperation(
       requestData,

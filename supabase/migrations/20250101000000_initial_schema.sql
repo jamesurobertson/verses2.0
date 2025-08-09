@@ -1,12 +1,12 @@
 -- Bible Memory App - Complete Database Schema
 -- This migration creates the complete database schema in one file
 
--- Drop existing tables and functions if they exist
+-- Drop existing tables and functions if they exist (PRESERVE VERSES AND ALIASES TABLES)
 DROP TABLE IF EXISTS review_logs CASCADE;
 DROP TABLE IF EXISTS verse_cards CASCADE;
-DROP TABLE IF EXISTS aliases CASCADE;
+-- DROP TABLE IF EXISTS aliases CASCADE; -- COMMENTED OUT - Keep existing aliases to preserve reference mappings
 DROP TABLE IF EXISTS user_profiles CASCADE;
-DROP TABLE IF EXISTS verses CASCADE;
+-- DROP TABLE IF EXISTS verses CASCADE; -- COMMENTED OUT - Keep existing verses to avoid wasting ESV API calls
 DROP VIEW IF EXISTS due_cards_view CASCADE;
 DROP FUNCTION IF EXISTS create_user_profile() CASCADE;
 DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
@@ -17,8 +17,8 @@ DROP FUNCTION IF EXISTS calculate_next_assigned_date() CASCADE;
 DROP FUNCTION IF EXISTS process_review_comprehensive() CASCADE;
 DROP FUNCTION IF EXISTS create_review_log_for_verse_card() CASCADE;
 
--- Verses Table
-CREATE TABLE public.verses (
+-- Verses Table (preserve existing verses)
+CREATE TABLE IF NOT EXISTS public.verses (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     reference text NOT NULL,
     text text NOT NULL,
@@ -31,8 +31,8 @@ CREATE TABLE public.verses (
 -- Enable RLS
 ALTER TABLE public.verses ENABLE ROW LEVEL SECURITY;
 
--- Aliases Table
-CREATE TABLE public.aliases (
+-- Aliases Table (preserve existing aliases)
+CREATE TABLE IF NOT EXISTS public.aliases (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     alias text UNIQUE NOT NULL,
     verse_id uuid NOT NULL REFERENCES public.verses(id) ON DELETE CASCADE,
@@ -113,10 +113,10 @@ CREATE INDEX idx_review_logs_user_id ON review_logs(user_id);
 CREATE INDEX idx_review_logs_verse_card_id ON review_logs(verse_card_id);
 CREATE INDEX idx_review_logs_created_at ON review_logs(created_at);
 
--- Prevent duplicate reviews per card per day (race condition protection)
--- Note: This uses UTC dates, but business logic should also use UTC for consistency
-CREATE UNIQUE INDEX idx_one_review_per_card_per_day 
-    ON review_logs(verse_card_id, user_id, date(created_at AT TIME ZONE 'UTC'));
+-- Allow multiple reviews per card per day - removed unique constraint
+-- The process_review_comprehensive() trigger handles count_toward_progress logic
+-- CREATE UNIQUE INDEX idx_one_review_per_card_per_day 
+--     ON review_logs(verse_card_id, user_id, date(created_at AT TIME ZONE 'UTC'));
 
 CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
 CREATE INDEX idx_user_profiles_email ON user_profiles(email);
@@ -303,7 +303,8 @@ BEGIN
     
   ELSIF phase_name = 'weekly' THEN
     -- Find next occurrence of assigned weekday
-    current_dow := EXTRACT(DOW FROM user_today);
+    -- Convert PostgreSQL DOW (0=Sun, 1=Mon, ..., 6=Sat) to our schema (1=Sun, 2=Mon, ..., 7=Sat)
+    current_dow := EXTRACT(DOW FROM user_today) + 1;
     days_ahead := (day_of_week_param - current_dow + 7) % 7;
     IF days_ahead = 0 THEN days_ahead := 7; END IF; -- If today, schedule for next week
     RETURN (user_today + days_ahead * INTERVAL '1 day')::DATE;
@@ -312,7 +313,8 @@ BEGIN
     -- Find next occurrence of assigned weekday + week parity using epoch-based calculation
     next_date := (user_today + INTERVAL '1 day')::DATE;
     LOOP
-      IF EXTRACT(DOW FROM next_date) = day_of_week_param 
+      -- Convert PostgreSQL DOW (0=Sun, 1=Mon, ..., 6=Sat) to our schema (1=Sun, 2=Mon, ..., 7=Sat)
+      IF (EXTRACT(DOW FROM next_date) + 1) = day_of_week_param 
          AND ((EXTRACT(EPOCH FROM next_date)::INTEGER / 86400) / 7) % 2 = week_parity_param THEN
         EXIT;
       END IF;
@@ -326,9 +328,30 @@ BEGIN
     
   ELSIF phase_name = 'monthly' THEN
     -- Find next occurrence of assigned day of month
-    next_date := DATE_TRUNC('month', user_today) + (day_of_month_param - 1);
+    -- Build the date for this month first
+    BEGIN
+      next_date := MAKE_DATE(
+        EXTRACT(YEAR FROM user_today)::INTEGER,
+        EXTRACT(MONTH FROM user_today)::INTEGER,
+        day_of_month_param
+      );
+    EXCEPTION WHEN OTHERS THEN
+      -- If day doesn't exist in current month (e.g., Feb 30), use last day of month
+      next_date := DATE_TRUNC('month', user_today) + INTERVAL '1 month' - INTERVAL '1 day';
+    END;
+    
+    -- If that date has passed, go to next month
     IF next_date <= user_today THEN
-      next_date := DATE_TRUNC('month', user_today + INTERVAL '1 month') + (day_of_month_param - 1);
+      BEGIN
+        next_date := MAKE_DATE(
+          EXTRACT(YEAR FROM user_today + INTERVAL '1 month')::INTEGER,
+          EXTRACT(MONTH FROM user_today + INTERVAL '1 month')::INTEGER,
+          day_of_month_param
+        );
+      EXCEPTION WHEN OTHERS THEN
+        -- If day doesn't exist in next month, use last day of that month
+        next_date := DATE_TRUNC('month', user_today + INTERVAL '2 months') - INTERVAL '1 day';
+      END;
     END IF;
     RETURN next_date;
   END IF;

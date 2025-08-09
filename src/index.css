@@ -45,3 +45,26 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* Custom scrollbar styles for verse references */
+.overflow-x-auto {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(28, 42, 57, 0.2) transparent;
+}
+
+.overflow-x-auto::-webkit-scrollbar {
+  height: 6px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: rgba(28, 42, 57, 0.2);
+  border-radius: 3px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(28, 42, 57, 0.4);
+}

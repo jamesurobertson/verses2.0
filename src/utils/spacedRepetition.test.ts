@@ -1,10 +1,8 @@
 // TDD Tests for spaced repetition logic
 import {
   processReview,
-  calculateNextDueDate,
-  ReviewPhase,
-  ReviewResult
-} from '../../src/utils/spacedRepetition';
+  calculateNextDueDate
+} from './spacedRepetition';
 
 describe('calculateNextDueDate', () => {
   test('calculates next due date for daily phase', () => {

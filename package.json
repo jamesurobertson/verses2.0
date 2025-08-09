@@ -11,7 +11,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "type-check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "supadbreset": "supabase db reset --linked",
     "supatypes": "supabase gen types typescript --linked > src/types/database.ts",
     "supafnd": "supabase functions deploy"

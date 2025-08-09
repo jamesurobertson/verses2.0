@@ -1,6 +1,18 @@
 import '@testing-library/jest-dom';
 import { TextEncoder, TextDecoder } from 'util';
 
+// Setup fake-indexeddb for Dexie testing
+import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
+// @ts-ignore
+import FDBFactory from 'fake-indexeddb/lib/FDBFactory';
+// @ts-ignore
+import FDBKeyRange from 'fake-indexeddb/lib/FDBKeyRange';
+
+// Configure Dexie to use fake-indexeddb
+Dexie.dependencies.indexedDB = new FDBFactory();
+Dexie.dependencies.IDBKeyRange = FDBKeyRange;
+
 // Add TextEncoder/TextDecoder for React Router
 (global as any).TextEncoder = TextEncoder;
 (global as any).TextDecoder = TextDecoder;
@@ -53,6 +65,18 @@ Object.defineProperty(window, 'matchMedia', {
   observe() {}
   unobserve() {}
 };
+
+// Reset database between tests
+beforeEach(async () => {
+  // Reset fake-indexeddb for clean test state
+  (global as any).indexedDB = new FDBFactory();
+  Dexie.dependencies.indexedDB = (global as any).indexedDB;
+  
+  // Close any open databases
+  if (typeof (global as any).db !== 'undefined') {
+    await (global as any).db.close();
+  }
+});
 
 // Setup console spy to track console errors in tests
 const originalError = console.error;
