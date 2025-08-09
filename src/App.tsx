@@ -2,6 +2,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { TimezoneProvider } from './contexts/TimezoneContext';
 import { AppRouter } from './router/AppRouter';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt/PWAInstallPrompt';
 import { useBackgroundSync } from './hooks/useBackgroundSync';
 import './App.css';
 
@@ -36,7 +37,12 @@ function AppContent() {
     syncOnOnline: true     // Sync when network reconnects
   });
 
-  return <AppRouter />;
+  return (
+    <>
+      <PWAInstallPrompt />
+      <AppRouter />
+    </>
+  );
 }
 
 export default App;

@@ -1,8 +1,8 @@
 import { db, type LocalDBSchema } from './localDb';
 import { supabaseClient, db as supabaseDb } from './supabase';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
-import { getTodayString } from '../utils/dateUtils';
-import { BatchSyncService, shouldUseBatchSync } from './batchSyncService';
+import { getTodayString, getUserTodayStringInTimezone } from '../utils/dateUtils';
+// import { BatchSyncService, shouldUseBatchSync } from './batchSyncService'; // Currently unused
 
 // Dual-write operation result interface
 export interface DualWriteResult<T> {
@@ -119,15 +119,19 @@ async function secureVerseOperation(operation: 'lookup' | 'create', reference: s
       // NO userToken in body - security best practice
     };
     
-    console.log('🚀 Sending request to verse-operations:', {
+    console.log('🚀 Sending request to verse-operations edge function:', {
       operation,
       reference,
-      hasToken: !!token
+      normalizedRef,
+      hasToken: !!token,
+      tokenLength: token?.length || 0,
+      supabaseUrl,
+      requestBody: JSON.stringify(requestBody)
     });
     
     // Add timeout for better performance
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for edge functions
     
     try {
       const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
@@ -142,12 +146,36 @@ async function secureVerseOperation(operation: 'lookup' | 'create', reference: s
       
       clearTimeout(timeoutId);
       
+      console.log('📡 Edge function response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Verse operation failed');
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (parseError) {
+          console.error('❌ Failed to parse error response:', parseError);
+          throw new Error(`Edge function failed with status ${response.status}: ${response.statusText}`);
+        }
+        console.error('❌ Edge function returned error:', errorData);
+        throw new Error(errorData.error || `Edge function failed with status ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('✅ Edge function success response:', {
+        hasVerse: !!data.verse,
+        verseId: data.verse?.id,
+        verseReference: data.verse?.reference,
+        hasUserCard: !!data.userCard,
+        userCardId: data.userCard?.id,
+        foundViaAlias: data.foundViaAlias,
+        source: data.source
+      });
+      
       return {
         verse: data.verse,
         foundViaAlias: data.foundViaAlias,
@@ -156,13 +184,19 @@ async function secureVerseOperation(operation: 'lookup' | 'create', reference: s
       };
     } catch (error) {
       clearTimeout(timeoutId);
-      console.log('Edge function call error:', error);
+      console.error('❌ Edge function call failed:', {
+        error,
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : 'No stack'
+      });
       
       if (error instanceof Error && (
         error.name === 'AbortError' || 
         error.message.includes('aborted') ||
         error.message.includes('cancelled')
       )) {
+        console.warn('⏱️ Edge function request timed out after 15 seconds');
         throw new NetworkError('Request timed out. Please check your connection and try again.', error);
       }
       // Check for fetch/network errors
@@ -174,12 +208,19 @@ async function secureVerseOperation(operation: 'lookup' | 'create', reference: s
         error.message.includes('Load failed') ||
         error.message.includes('Network request failed')
       )) {
+        console.warn('🌐 Network connectivity issue detected');
         throw new NetworkError('Unable to connect to server. Please check your internet connection.', error);
       }
+      
+      // Re-throw other errors (like validation errors from edge function)
       throw error;
     }
   } catch (error) {
-    console.error('Secure verse operation error:', error);
+    console.error('❌ Overall secure verse operation failed:', {
+      error,
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      message: error instanceof Error ? error.message : String(error)
+    });
     throw error;
   }
 }
@@ -215,7 +256,7 @@ export const dataService: any = {
    * Adds a new verse with local-first approach:
    * 1. Check local database (verses + aliases table)
    * 2. If authenticated: Check remote database via edge functions
-   * 3. If local-only: Create verse manually (user provides text)
+   * 3. If offline/no API: Create verse manually (user provides text)
    * 4. Dual-write pattern with graceful remote sync
    * ✅ NO async calls inside transactions (follows Dexie best practices)
    */
@@ -241,7 +282,24 @@ export const dataService: any = {
     };
 
     const normalizedInput = normalizeReferenceForLookup(reference);
-    const nextDueDate = getTodayString();
+    
+    // Get user's timezone for consistent date calculations
+    const userProfile = await db.user_profiles.where('user_id').equals(userId).first();
+    const userTimezone = userProfile?.timezone || 'UTC';
+    const nextDueDate = getUserTodayStringInTimezone(userTimezone);
+
+    console.log('🔄 addVerse called with timezone information:', {
+      reference,
+      normalizedInput,
+      userId: userId ? `${userId.slice(0, 8)}...` : 'None',
+      userTimezone,
+      nextDueDate,
+      browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      utcToday: new Date().toISOString().split('T')[0],
+      localToday: getTodayString(),
+      hasAccessToken: !!accessToken,
+      hasManualText: !!manualText
+    });
 
     try {
       // STEP 1: Check Local Database (verses + aliases)
@@ -301,6 +359,15 @@ export const dataService: any = {
         }
 
         // User doesn't have this verse - add alias if needed and create verse_card
+        console.log('🔄 Found verse locally, creating user card with timezone-aware date:', {
+          verseReference: localVerse.reference,
+          userTimezone,
+          nextDueDate,
+          browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          utcToday: new Date().toISOString().split('T')[0],
+          localToday: getTodayString()
+        });
+
         const existingAlias = await db.aliases
           .where('alias')
           .equals(normalizedInput)
@@ -319,75 +386,131 @@ export const dataService: any = {
         }
 
         // Create verse_card in transaction
-        await db.transaction('rw', db.verse_cards, async (tx) => {
-          const now = new Date().toISOString();
-          const cardData: LocalDBSchema['verse_cards'] = {
-            id: crypto.randomUUID(),
-            user_id: userId,
-            verse_id: localVerse!.id!,
-            current_phase: 'daily',
-            phase_progress_count: 0,
-            last_reviewed_at: null,
-            next_due_date: nextDueDate,
-            assigned_day_of_week: null,
-            assigned_week_parity: null,
-            assigned_day_of_month: null,
-            archived: false,
-            current_streak: 0,
-            best_streak: 0,
-            created_at: now,
-            updated_at: now
-          };
-          await tx.verse_cards.add(cardData);
-          result.local = { verse: localVerse!, verseCard: cardData };
-        });
+        try {
+          await db.transaction('rw', db.verse_cards, async (tx) => {
+            const now = new Date().toISOString();
+            const cardData: LocalDBSchema['verse_cards'] = {
+              id: crypto.randomUUID(),
+              user_id: userId,
+              verse_id: localVerse!.id!,
+              current_phase: 'daily',
+              phase_progress_count: 0,
+              last_reviewed_at: null,
+              next_due_date: nextDueDate,
+              assigned_day_of_week: null,
+              assigned_week_parity: null,
+              assigned_day_of_month: null,
+              archived: false,
+              current_streak: 0,
+              best_streak: 0,
+              created_at: now,
+              updated_at: now
+            };
+            
+            console.log('🔄 Creating verse card:', { 
+              userId, 
+              verseId: localVerse!.id,
+              reference: localVerse!.reference,
+              cardId: cardData.id 
+            });
+            
+            await tx.verse_cards.add(cardData);
+            result.local = { verse: localVerse!, verseCard: cardData };
+            
+            console.log('✅ Verse card created successfully');
+          });
+        } catch (error) {
+          console.error('❌ Failed to create verse card:', error);
+          throw error;
+        }
 
-        // Sync to remote (outside transaction)
-        await this.syncVerseToRemote(result.local!.verse, result.local!.verseCard, result, accessToken);
+        // Remote sync is no longer needed - edge functions handle it
+        console.log('✅ Local verse card created (no remote sync needed, edge function handles it)');
         result.success = true;
         return result;
       }
 
-      // STEP 2: Handle remote operations (authenticated/anonymous modes only)
+      // STEP 2: Handle remote operations via edge function (authenticated mode only)
       if (accessToken) {
+        console.log('🚀 Calling edge function for verse creation...', {
+          reference,
+          normalizedInput,
+          hasAccessToken: !!accessToken
+        });
+        
         try {
-          const { verse: foundRemoteVerse, existingCard } = await cachedVerseOperation('create', reference, normalizedInput, accessToken);
+          const { verse: foundRemoteVerse, userCard: remoteUserCard } = await cachedVerseOperation('create', reference, normalizedInput, accessToken);
 
           if (foundRemoteVerse) {
-            // We already have the user's card info from the optimized lookup
-            if (existingCard) {
-              if (existingCard.archived) {
-                // Handle archived card unarchiving
-                throw new DuplicateVerseError(foundRemoteVerse.reference, {
-                  verse: foundRemoteVerse,
-                  verseCard: existingCard
-                });
-              } else {
-                // Active card exists
-                throw new DuplicateVerseError(foundRemoteVerse.reference, {
-                  verse: foundRemoteVerse,
-                  verseCard: existingCard
-                });
-              }
-            }
+            console.log('✅ Edge function returned verse:', {
+              verseId: foundRemoteVerse.id,
+              reference: foundRemoteVerse.reference,
+              hasUserCard: !!remoteUserCard,
+              userCardId: remoteUserCard?.id,
+              isArchived: remoteUserCard?.archived
+            });
 
-            // No existing card for user - sync remote to local and create verse_card
-            await this.syncRemoteVerseToLocal(foundRemoteVerse, normalizedInput, userId, nextDueDate, result);
+            // Handle different scenarios:
+            if (remoteUserCard && remoteUserCard.archived) {
+              // Unarchive existing card
+              console.log('🔄 Unarchiving existing verse card...');
+              await this.unarchiveVerseCard(remoteUserCard.id, userId, accessToken, foundRemoteVerse, normalizedInput, nextDueDate, result);
+            } else if (!remoteUserCard) {
+              // Create new verse card (both locally and remotely)
+              console.log('🔄 Creating new verse card...');
+              await this.createVerseCardEverywhere(foundRemoteVerse, normalizedInput, userId, nextDueDate, result, accessToken);
+            } else {
+              // This shouldn't happen - active card should have been caught by edge function
+              throw new ValidationError(`Verse "${foundRemoteVerse.reference}" already exists in your collection`);
+            }
+            
+            console.log('✅ Complete verse creation flow finished successfully');
             result.success = true;
             return result;
+          } else {
+            console.warn('⚠️ Edge function returned no verse - unexpected');
           }
         } catch (error) {
+          console.error('❌ Edge function call failed in addVerse:', {
+            error,
+            errorType: error instanceof Error ? error.constructor.name : typeof error,
+            message: error instanceof Error ? error.message : String(error)
+          });
+          
           // Re-throw network errors so the UI can handle them (switch to manual entry mode)
           if (error instanceof NetworkError) {
+            console.log('🌐 Re-throwing NetworkError for manual entry mode');
             throw error;
           }
-          // Continue to local-only creation below for other errors
+          
+          // Handle ESV validation errors (invalid references)
+          if (error instanceof Error && (
+            error.message.includes('Invalid Bible reference') ||
+            error.message.includes('not found') ||
+            error.message.includes('does not exist') ||
+            error.message.includes('invalid') ||
+            error.message.includes('No passage found')
+          )) {
+            console.log('📖 Re-throwing validation error');
+            throw new ValidationError('Please check the Bible reference and try again. Make sure the book name, chapter, and verse numbers are correct.');
+          }
+          
+          // Re-throw duplicate verse errors (from edge function)
+          if (error instanceof Error && error.message.includes('already exists in your collection')) {
+            console.log('📚 Re-throwing duplicate verse error');
+            throw new ValidationError(error.message);
+          }
+          
+          console.log('🔄 Edge function failed, falling back to manual creation...');
+          // Continue to manual creation below for other errors
         }
+      } else {
+        console.log('⚠️ No access token available, skipping edge function call');
       }
 
-      // STEP 3: Local-only verse creation (no ESV API access)
+      // STEP 3: Manual verse creation (fallback when connection issues occur)
       if (!manualText || manualText.trim() === '') {
-        throw new ValidationError('Verse text is required for local-only mode. Please provide the verse text manually.');
+        throw new NetworkError('Connection issue detected. Please enter the verse text manually to continue.');
       }
 
       await this.createLocalOnlyVerse(reference, manualText.trim(), normalizedInput, userId, nextDueDate, result);
@@ -416,43 +539,23 @@ export const dataService: any = {
     }
   },
 
-  // Helper methods for addVerse
+  // DEPRECATED: This function should no longer be used - edge functions handle remote creation
   async syncVerseToRemote(verse: LocalDBSchema['verses'], verseCard: LocalDBSchema['verse_cards'], result: any, accessToken?: string) {
-    // Skip remote sync if no access token (local-only mode)
-    if (!accessToken) {
-      console.log('Skipping remote sync - local-only mode');
-      return;
-    }
+    console.warn('⚠️ syncVerseToRemote called - this should not happen anymore! Edge functions handle remote creation.');
+    console.log('🔄 Deprecated sync called for:', {
+      verseId: verse.id,
+      reference: verse.reference,
+      verseCardId: verseCard.id,
+      userId: verseCard.user_id,
+      hasAccessToken: !!accessToken
+    });
 
-    try {
-      // Verse creation is now handled by secure edge functions
-      // Just create the verse card since verse should already exist remotely
-      const { error: cardError } = await supabaseDb.verseCards.create({
-        user_id: verseCard.user_id,
-        verse_id: verse.id!, // Use local verse ID - should match remote due to edge function
-        current_phase: verseCard.current_phase,
-        phase_progress_count: verseCard.phase_progress_count,
-        last_reviewed_at: verseCard.last_reviewed_at,
-        next_due_date: verseCard.next_due_date,
-        assigned_day_of_week: verseCard.assigned_day_of_week,
-        assigned_week_parity: verseCard.assigned_week_parity,
-        assigned_day_of_month: verseCard.assigned_day_of_month,
-        archived: verseCard.archived,
-        current_streak: verseCard.current_streak,
-        best_streak: verseCard.best_streak
-      });
-
-      if (cardError) throw cardError;
-    } catch (err) {
-      result.errors.remote = new NetworkError(
-        'Failed to sync to remote database - data saved locally',
-        err as Error
-      );
-    }
+    // This function is deprecated - edge functions should handle all remote operations
+    result.errors.remote = new Error('syncVerseToRemote is deprecated - edge functions should handle remote operations');
   },
 
-  async syncRemoteVerseToLocal(remoteVerse: any, alias: string, userId: string, nextDueDate: string, result: any) {
-    // Create verse locally in transaction
+  async syncRemoteVerseToLocal(remoteVerse: any, alias: string, userId: string, nextDueDate: string, result: any, remoteUserCard?: any) {
+    // Create verse and card locally in transaction
     await db.transaction('rw', db.verses, db.aliases, db.verse_cards, async (tx) => {
       const now = new Date().toISOString();
       
@@ -479,34 +582,69 @@ export const dataService: any = {
         });
       }
 
-      // Create verse_card
+      // Create verse_card using data from remote (if provided) or defaults
       const cardData: LocalDBSchema['verse_cards'] = {
-        id: crypto.randomUUID(),
+        id: crypto.randomUUID(), // Local ID (different from remote)
         user_id: userId,
         verse_id: localVerseData.id!,
-        current_phase: 'daily',
-        phase_progress_count: 0,
-        last_reviewed_at: null,
-        next_due_date: nextDueDate,
-        assigned_day_of_week: null,
-        assigned_week_parity: null,
-        assigned_day_of_month: null,
-        archived: false,
-        current_streak: 0,
-        best_streak: 0,
-        created_at: now,
-        updated_at: now
+        current_phase: remoteUserCard?.current_phase || 'daily',
+        phase_progress_count: remoteUserCard?.phase_progress_count || 0,
+        last_reviewed_at: remoteUserCard?.last_reviewed_at || null,
+        next_due_date: remoteUserCard?.next_due_date || nextDueDate,
+        assigned_day_of_week: remoteUserCard?.assigned_day_of_week || null,
+        assigned_week_parity: remoteUserCard?.assigned_week_parity || null,
+        assigned_day_of_month: remoteUserCard?.assigned_day_of_month || null,
+        archived: remoteUserCard?.archived || false,
+        current_streak: remoteUserCard?.current_streak || 0,
+        best_streak: remoteUserCard?.best_streak || 0,
+        created_at: remoteUserCard?.created_at || now,
+        updated_at: remoteUserCard?.updated_at || now
       };
+      
+      console.log('🔄 Creating verse card (remote sync with edge function data):', { 
+        userId, 
+        verseId: localVerseData.id,
+        reference: remoteVerse.reference,
+        cardId: cardData.id,
+        remoteCardId: remoteUserCard?.id
+      });
+      
       await tx.verse_cards.add(cardData);
-
       result.local = { verse: localVerseData, verseCard: cardData };
+      
+      console.log('✅ Verse card created successfully (remote sync)');
     });
   },
 
-  async addAliasAndCreateCard(verse: any, alias: string, userId: string, nextDueDate: string, result: any) {
-    await db.transaction('rw', db.aliases, db.verse_cards, async (tx) => {
-      const now = new Date().toISOString();
-      
+  /**
+   * Creates verse card both locally and remotely (dual-write)
+   */
+  async createVerseCardEverywhere(verse: any, alias: string, userId: string, nextDueDate: string, result: any, accessToken?: string) {
+    console.log('🔄 Creating verse card with timezone-aware date:', {
+      nextDueDate,
+      verseId: verse.id,
+      reference: verse.reference
+    });
+    
+    const now = new Date().toISOString();
+    let localCard: LocalDBSchema['verse_cards'];
+    
+    // Step 1: Create locally first (optimistic)
+    await db.transaction('rw', db.verses, db.aliases, db.verse_cards, async (tx) => {
+      // Ensure verse exists locally
+      const existingVerse = await tx.verses.get(verse.id);
+      if (!existingVerse) {
+        await tx.verses.add({
+          id: verse.id,
+          reference: verse.reference,
+          text: verse.text,
+          translation: verse.translation,
+          is_verified: true,
+          created_at: verse.created_at || now,
+          updated_at: verse.updated_at || now
+        });
+      }
+
       // Add alias if it doesn't exist
       const existingAlias = await tx.aliases.where('alias').equals(alias).first();
       if (!existingAlias) {
@@ -518,7 +656,7 @@ export const dataService: any = {
         });
       }
 
-      // Create verse_card
+      // Create verse_card locally
       const cardData: LocalDBSchema['verse_cards'] = {
         id: crypto.randomUUID(),
         user_id: userId,
@@ -537,9 +675,88 @@ export const dataService: any = {
         updated_at: now
       };
       await tx.verse_cards.add(cardData);
-
-      result.local = { verse: verse, verseCard: cardData };
+      localCard = cardData;
     });
+
+    result.local = { verse, verseCard: localCard! };
+    
+    // Step 2: Create remotely (graceful degradation)
+    if (accessToken) {
+      try {
+        console.log('🔄 Creating verse card remotely via Supabase with data:', {
+          user_id: userId.slice(0, 8) + '...',
+          verse_id: verse.id,
+          next_due_date: nextDueDate,
+          current_phase: 'daily'
+        });
+        
+        const { error: cardError, data: remoteCardData } = await supabaseDb.verseCards.create({
+          user_id: userId,
+          verse_id: verse.id,
+          current_phase: 'daily',
+          phase_progress_count: 0,
+          last_reviewed_at: null,
+          next_due_date: nextDueDate,
+          assigned_day_of_week: null,
+          assigned_week_parity: null,
+          assigned_day_of_month: null,
+          archived: false,
+          current_streak: 0,
+          best_streak: 0
+        });
+        
+        console.log('📊 Remote verse card creation result:', {
+          success: !cardError,
+          error: cardError?.message,
+          remoteCardId: remoteCardData?.id,
+          remoteDueDate: remoteCardData?.next_due_date
+        });
+
+        if (cardError) {
+          console.error('❌ Failed to create verse card remotely:', cardError);
+          result.errors.remote = new NetworkError('Failed to sync verse card to remote', cardError);
+        } else {
+          console.log('✅ Verse card created remotely successfully');
+        }
+      } catch (error) {
+        console.error('❌ Remote verse card creation failed:', error);
+        result.errors.remote = new NetworkError('Failed to sync verse card to remote', error as Error);
+      }
+    }
+  },
+
+  /**
+   * Unarchives an existing verse card both locally and remotely
+   */
+  async unarchiveVerseCard(cardId: string, userId: string, _accessToken: string, verse: any, alias: string, nextDueDate: string, result: any) {
+    const now = new Date().toISOString();
+    
+    // Step 1: Update remotely first
+    try {
+      console.log('🔄 Unarchiving verse card remotely...');
+      const { error: unarchiveError } = await supabaseDb.verseCards.update(cardId, {
+        archived: false,
+        current_phase: 'daily',
+        phase_progress_count: 0,
+        current_streak: 0,
+        next_due_date: nextDueDate,
+        assigned_day_of_week: null,
+        assigned_week_parity: null,
+        assigned_day_of_month: null,
+        updated_at: now
+      }, userId);
+
+      if (unarchiveError) {
+        throw unarchiveError;
+      }
+      console.log('✅ Verse card unarchived remotely');
+    } catch (error) {
+      console.error('❌ Failed to unarchive verse card remotely:', error);
+      throw new Error(`Failed to restore verse: ${(error as Error).message}`);
+    }
+
+    // Step 2: Sync to local database
+    await this.syncRemoteVerseToLocal(verse, alias, userId, nextDueDate, result);
   },
 
   async createLocalOnlyVerse(reference: string, text: string, alias: string, userId: string, nextDueDate: string, result: any) {
@@ -587,9 +804,18 @@ export const dataService: any = {
         created_at: now,
         updated_at: now
       };
+      
+      console.log('🔄 Creating verse card (local only):', { 
+        userId, 
+        verseId: localVerseData.id,
+        reference: localVerseData.reference,
+        cardId: cardData.id 
+      });
+      
       await tx.verse_cards.add(cardData);
-
       result.local = { verse: localVerseData, verseCard: cardData };
+      
+      console.log('✅ Verse card created successfully (local only)');
     });
   },
 
@@ -602,7 +828,7 @@ export const dataService: any = {
 
   /**
    * Records a review log entry with dual-write strategy
-   * Supports local-only mode by skipping remote sync when no access token
+   * Skips remote sync when no access token (offline or session issues)
    * ✅ FIXED: Transaction contains only Dexie operations, external calls outside
    */
   async recordReview(
@@ -742,7 +968,13 @@ export const dataService: any = {
     };
 
     try {
-      // Get local verse cards for the user (filter by timestamp if provided)
+      console.log('🔄 Starting comprehensive sync to remote...', {
+        userId: userId.slice(0, 8) + '...',
+        lastSyncTimestamp
+      });
+
+      // PART 1: Sync unverified verses (existing logic)
+      console.log('📝 Part 1: Syncing unverified verses...');
       let localCards = await db.verse_cards
         .where('user_id')
         .equals(userId)
@@ -766,7 +998,151 @@ export const dataService: any = {
         );
       }
 
-      console.log(`📊 Sync summary: ${finalCardsToSync.length} unverified verses to sync`);
+      console.log(`📊 Unverified verses to sync: ${finalCardsToSync.length}`);
+
+      // PART 2: Sync all local changes (verse cards, review logs, profile)
+      console.log('📝 Part 2: Syncing all local changes...');
+
+      // Get all verse cards that were updated since last sync (including archived ones for sync)
+      const changedCards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => {
+          if (!lastSyncTimestamp) return true; // First sync - sync all
+          return new Date(card.updated_at) > new Date(lastSyncTimestamp);
+        })
+        .toArray();
+
+      console.log(`📊 Changed verse cards to sync: ${changedCards.length}`);
+
+      // Get review logs that were created since last sync  
+      const newReviewLogs = await db.review_logs
+        .where('user_id')
+        .equals(userId)
+        .filter(log => {
+          if (!lastSyncTimestamp) return true; // First sync - sync all
+          return new Date(log.created_at) > new Date(lastSyncTimestamp);
+        })
+        .toArray();
+
+      console.log(`📊 New review logs to sync: ${newReviewLogs.length}`);
+
+      // Check if user profile was updated since last sync
+      const userProfile = await db.user_profiles.where('user_id').equals(userId).first();
+      const profileNeedsSync = userProfile && (!lastSyncTimestamp || 
+        new Date(userProfile.updated_at) > new Date(lastSyncTimestamp));
+
+      console.log(`📊 User profile needs sync: ${!!profileNeedsSync}`);
+
+      // Get access token for authenticated operations (skip if anonymous/offline)
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const accessToken = session?.access_token;
+      
+      if (!accessToken) {
+        console.log('⚠️ No access token available - skipping authenticated sync operations');
+        return result;
+      }
+
+      // Sync changed verse cards to remote
+      for (const localCard of changedCards) {
+        try {
+          const verse = await db.verses.get(localCard.verse_id);
+          if (!verse) continue;
+
+          console.log(`🔄 Syncing verse card: ${verse.reference}`);
+          await this.updateVerseCardRemote(localCard.id!, localCard, userId, accessToken); 
+          result.synced++;
+        } catch (error) {
+          console.error(`❌ Failed to sync verse card ${localCard.id}:`, error);
+          result.failed++;
+          result.errors.push(error as Error);
+        }
+      }
+
+      // Sync new review logs to remote
+      for (const localLog of newReviewLogs) {
+        try {
+          console.log(`🔄 Syncing review log: ${localLog.id}`);
+          
+          // Find the remote verse card for this review log
+          const localCard = await db.verse_cards.get(localLog.verse_card_id);
+          if (!localCard) continue;
+
+          const verse = await db.verses.get(localCard.verse_id);
+          if (!verse?.id) continue;
+
+          // Find remote card by user_id + verse reference
+          const { data: remoteCards } = await supabaseClient
+            .from('verse_cards')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('verse_id', verse.id);
+
+          const remoteCard = remoteCards?.[0];
+          if (!remoteCard?.id) continue;
+
+          // Check if this review log already exists in remote (prevent duplicates)
+          // Use a time window approach: check for similar reviews within ±10 seconds
+          const logTime = new Date(localLog.created_at);
+          const windowStart = new Date(logTime.getTime() - 10000); // 10 seconds before
+          const windowEnd = new Date(logTime.getTime() + 10000);   // 10 seconds after
+          
+          const { data: existingLogs } = await supabaseClient
+            .from('review_logs')
+            .select('id, created_at, was_successful')
+            .eq('user_id', userId)
+            .eq('verse_card_id', remoteCard.id)
+            .gte('created_at', windowStart.toISOString())
+            .lte('created_at', windowEnd.toISOString())
+            .eq('was_successful', localLog.was_successful);
+
+          if (existingLogs && existingLogs.length > 0) {
+            console.log(`⏭️ Similar review log already exists remotely (within 10s window), skipping: ${localLog.id}`);
+            continue;
+          }
+
+          // Create review log in remote database
+          const { error: reviewError } = await supabaseClient
+            .from('review_logs')
+            .insert({
+              user_id: userId,
+              verse_card_id: remoteCard.id,
+              was_successful: localLog.was_successful,
+              counted_toward_progress: localLog.counted_toward_progress,
+              review_time_seconds: localLog.review_time_seconds,
+              created_at: localLog.created_at
+            });
+
+          if (reviewError) {
+            throw reviewError;
+          }
+
+          result.synced++;
+        } catch (error) {
+          console.error(`❌ Failed to sync review log ${localLog.id}:`, error);
+          result.failed++;
+          result.errors.push(error as Error);
+        }
+      }
+
+      // Sync user profile if it was updated
+      if (profileNeedsSync && userProfile) {
+        try {
+          console.log(`🔄 Syncing user profile changes...`);
+          await this.updateUserProfile(userId, userProfile, accessToken);
+          result.synced++;
+        } catch (error) {
+          console.error(`❌ Failed to sync user profile:`, error);
+          result.failed++;
+          result.errors.push(error as Error);
+        }
+      }
+
+      console.log(`📊 Comprehensive sync summary: 
+        - ${finalCardsToSync.length} unverified verses to sync
+        - ${changedCards.length} changed verse cards synced
+        - ${newReviewLogs.length} review logs synced
+        - ${profileNeedsSync ? 1 : 0} profile updates synced`);
 
       for (const { card: _localCard, verse: localVerse } of finalCardsToSync) {
         try {
@@ -800,7 +1176,7 @@ export const dataService: any = {
               result.synced++;
               continue; // Skip to next verse, this one is now verified
             } else {
-              throw new Error(`ESV API could not validate reference: ${localVerse.reference}`);
+              throw new Error(`Could not validate reference: ${localVerse.reference}`);
             }
             
           } catch (createError) {
@@ -829,6 +1205,16 @@ export const dataService: any = {
                 validation_error: createError.message,
                 updated_at: new Date().toISOString()
               });
+              
+              // Verify the update worked
+              const updatedVerse = await db.verses.get(localVerse.id!);
+              console.log(`✅ Verse ${localVerse.reference} marked with validation error:`, {
+                id: updatedVerse?.id,
+                reference: updatedVerse?.reference,
+                validation_error: updatedVerse?.validation_error,
+                is_verified: updatedVerse?.is_verified
+              });
+              
               result.synced++; // Count as "handled" even though it's invalid
               continue;
             } 
@@ -948,28 +1334,28 @@ export const dataService: any = {
             });
             result.synced++;
           } else {
-            // Update existing card if remote is newer
+            // Smart merge strategy to prevent data loss
             const localUpdated = new Date(localCard.updated_at);
             const remoteUpdated = new Date(remoteCard.updated_at || localCard.updated_at);
+            
+            console.log(`🔄 Conflict resolution for verse ${remoteVerse.reference}:`, {
+              localUpdated: localUpdated.toISOString(),
+              remoteUpdated: remoteUpdated.toISOString(),
+              timeDiff: remoteUpdated.getTime() - localUpdated.getTime()
+            });
 
-            if (remoteUpdated > localUpdated) {
+            // Always perform smart merge, even if timestamps are equal
+            const needsUpdate = await this.smartMergeVerseCard(localCard, remoteCard);
+            
+            if (needsUpdate.hasChanges) {
               await db.transaction('rw', db.verse_cards, async (tx) => {
-                const updateData = {
-                  current_phase: remoteCard.current_phase as 'daily' | 'weekly' | 'biweekly' | 'monthly',
-                  phase_progress_count: remoteCard.phase_progress_count,
-                  last_reviewed_at: remoteCard.last_reviewed_at || undefined,
-                  next_due_date: remoteCard.next_due_date,
-                  assigned_day_of_week: remoteCard.assigned_day_of_week,
-                  assigned_week_parity: remoteCard.assigned_week_parity,
-                  assigned_day_of_month: remoteCard.assigned_day_of_month,
-                  archived: remoteCard.archived,
-                  current_streak: remoteCard.current_streak,
-                  best_streak: remoteCard.best_streak || 0,
-                  updated_at: remoteCard.updated_at || new Date().toISOString()
-                };
-                await tx.verse_cards.update(localCard.id!, updateData);
+                await tx.verse_cards.update(localCard.id!, needsUpdate.mergedData);
               });
               result.synced++;
+              
+              if (needsUpdate.conflicts.length > 0) {
+                console.warn(`⚠️ Conflicts resolved for ${remoteVerse.reference}:`, needsUpdate.conflicts);
+              }
             }
           }
         } catch (error) {
@@ -1045,8 +1431,11 @@ export const dataService: any = {
    * Syncs user profile from remote to local database
    */
   async syncUserProfile(userId: string): Promise<void> {
+    console.log('🔄 Starting user profile sync for user:', userId.slice(0, 8) + '...');
+    
     try {
       // Get user profile from remote
+      console.log('🔄 Fetching remote user profile...');
       const { data: remoteProfile, error } = await supabaseClient
         .from('user_profiles')
         .select('*')
@@ -1054,9 +1443,15 @@ export const dataService: any = {
         .single();
 
       if (error) {
-        console.warn('No remote user profile found:', error.message);
+        console.warn('❌ No remote user profile found:', error.message);
         return;
       }
+
+      console.log('✅ Remote profile found:', {
+        email: remoteProfile.email || '(empty)',
+        // pending_email is local-only field for email verification state
+        full_name: remoteProfile.full_name || '(empty)'
+      });
 
       if (remoteProfile) {
         // Check if profile exists locally
@@ -1064,6 +1459,12 @@ export const dataService: any = {
           .where('user_id')
           .equals(userId)
           .first();
+
+        console.log('📍 Local profile before update:', existingProfile ? {
+          email: existingProfile.email || '(empty)',
+          pending_email: existingProfile.pending_email_verification || '(none)',
+          full_name: existingProfile.full_name || '(empty)'
+        } : 'None found');
 
         const profileData: LocalDBSchema['user_profiles'] = {
           id: remoteProfile.id,
@@ -1073,6 +1474,8 @@ export const dataService: any = {
           timezone: remoteProfile.timezone || 'UTC',
           preferred_translation: remoteProfile.preferred_translation || 'ESV',
           reference_display_mode: remoteProfile.reference_display_mode || 'first',
+          pending_email_verification: null, // Local-only field
+          email_verification_sent_at: null, // Local-only field
           created_at: remoteProfile.created_at || new Date().toISOString(),
           updated_at: remoteProfile.updated_at || new Date().toISOString()
         };
@@ -1080,7 +1483,11 @@ export const dataService: any = {
         if (existingProfile) {
           // Update existing profile
           await db.user_profiles.update(existingProfile.id!, profileData);
-          console.log('✅ Updated local user profile');
+          console.log('✅ Updated local user profile with new data:', {
+            email: profileData.email || '(empty)',
+            pending_email: profileData.pending_email_verification || '(none)',
+            full_name: profileData.full_name || '(empty)'
+          });
         } else {
           // Create new profile
           await db.user_profiles.add(profileData);
@@ -1088,7 +1495,7 @@ export const dataService: any = {
         }
       }
     } catch (error) {
-      console.error('Failed to sync user profile:', error);
+      console.error('❌ Failed to sync user profile:', error);
     }
   },
 
@@ -1209,33 +1616,41 @@ export const dataService: any = {
     userId: string, 
     lastSyncTimestamp?: string
   ): Promise<BatchDualWriteResult | ReturnType<typeof dataService.sync>> {
-    // Check current queue status
-    const queueStatus = BatchSyncService.getQueueStatus();
-    const userOperations = queueStatus.operations.filter(op => op.userId === userId);
-    
-    console.log(`🧠 Intelligent sync: ${userOperations.length} queued operations for user`);
-    
-    // Decide whether to use batch or individual sync
-    const useBatch = await shouldUseBatchSync(userOperations.length);
-    
-    if (useBatch && userOperations.length > 0) {
-      try {
-        console.log(`🚀 Using batch sync for ${userOperations.length} operations`);
-        const batchResult = await BatchSyncService.processBatchQueue();
-        
-        // Also run individual sync to catch any non-queued changes
-        if (lastSyncTimestamp) {
-          const individualResult = await this.sync(userId, lastSyncTimestamp);
-          console.log(`📊 Individual sync completed: ${individualResult.toRemote.synced + individualResult.fromRemote.synced} records`);
+    try {
+      // Import BatchSyncService dynamically to avoid circular imports
+      const { BatchSyncService, shouldUseBatchSync } = await import('./batchSyncService');
+      
+      // Check current queue status
+      const queueStatus = BatchSyncService.getQueueStatus();
+      const userOperations = queueStatus.operations.filter(op => op.userId === userId);
+      
+      console.log(`🧠 Intelligent sync: ${userOperations.length} queued operations for user`);
+      
+      // Decide whether to use batch or individual sync
+      const useBatch = await shouldUseBatchSync(userOperations.length);
+      
+      if (useBatch && userOperations.length > 0) {
+        try {
+          console.log(`🚀 Using batch sync for ${userOperations.length} operations`);
+          const batchResult = await BatchSyncService.processBatchQueue();
+          
+          // Also run individual sync to catch any non-queued changes
+          if (lastSyncTimestamp) {
+            const individualResult = await this.sync(userId, lastSyncTimestamp);
+            console.log(`📊 Individual sync completed: ${individualResult.toRemote.synced + individualResult.fromRemote.synced} records`);
+          }
+          
+          return batchResult;
+        } catch (error) {
+          console.warn('Batch sync failed, falling back to individual sync:', error);
+          return await this.sync(userId, lastSyncTimestamp);
         }
-        
-        return batchResult;
-      } catch (error) {
-        console.warn('Batch sync failed, falling back to individual sync:', error);
+      } else {
+        console.log(`📱 Using individual sync (queue size: ${userOperations.length})`);
         return await this.sync(userId, lastSyncTimestamp);
       }
-    } else {
-      console.log(`📱 Using individual sync (queue size: ${userOperations.length})`);
+    } catch (error) {
+      console.warn('BatchSyncService not available, using individual sync:', error);
       return await this.sync(userId, lastSyncTimestamp);
     }
   },
@@ -1249,21 +1664,43 @@ export const dataService: any = {
     localRef: string,
     userId: string
   ): Promise<void> {
-    return BatchSyncService.queueOperation(type, data, localRef, userId);
+    try {
+      const { BatchSyncService } = await import('./batchSyncService');
+      return await BatchSyncService.queueOperation(type, data, localRef, userId);
+    } catch (error) {
+      console.warn('BatchSyncService not available, skipping queue operation:', error);
+    }
   },
 
   /**
    * Forces immediate processing of the sync queue
    */
   async flushSyncQueue(): Promise<BatchDualWriteResult> {
-    return BatchSyncService.flushQueue();
+    try {
+      const { BatchSyncService } = await import('./batchSyncService');
+      return await BatchSyncService.flushQueue();
+    } catch (error) {
+      console.warn('BatchSyncService not available, returning empty result:', error);
+      return {
+        batchId: crypto.randomUUID(),
+        operations: [],
+        summary: { total: 0, successful: 0, failed: 0, networkErrors: 0, validationErrors: 0 },
+        processingTimeMs: 0
+      };
+    }
   },
 
   /**
    * Gets the current sync queue status for debugging/monitoring
    */
   getSyncQueueStatus() {
-    return BatchSyncService.getQueueStatus();
+    try {
+      const { BatchSyncService } = require('./batchSyncService');
+      return BatchSyncService.getQueueStatus();
+    } catch (error) {
+      console.warn('BatchSyncService not available:', error);
+      return { pending: 0, processing: 0, failed: 0, operations: [] };
+    }
   },
 
   /**
@@ -1305,10 +1742,16 @@ export const dataService: any = {
       // Step 2: Sync to remote (graceful degradation)
       if (accessToken) {
         try {
+          // Filter out local-only fields from remote sync
+          const { pending_email_verification, email_verification_sent_at, ...remoteUpdates } = updates;
+          
           const { data: remoteProfile, error: remoteError } = await supabaseClient
             .from('user_profiles')
-            .update(updates)
-            .eq('user_id', userId)
+            .upsert({
+              user_id: userId,
+              ...remoteUpdates,
+              updated_at: new Date().toISOString()
+            })
             .select()
             .single();
 
@@ -1326,6 +1769,591 @@ export const dataService: any = {
       return result;
     } catch (error) {
       result.errors.local = error as Error;
+      throw error;
+    }
+  },
+
+  /**
+   * Lookup a verse reference using ESV API (for VerseDetails page)
+   * Returns verse data without adding to user's collection
+   */
+  async lookupVerseReference(reference: string): Promise<{ success: boolean; verse?: LocalDBSchema['verses'] }> {
+    try {
+      const supabaseUrl = process.env.NODE_ENV === 'test' 
+        ? process.env.VITE_SUPABASE_URL 
+        : import.meta.env.VITE_SUPABASE_URL;
+      
+      // Get access token for authenticated call
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('User not authenticated');
+      }
+
+      // Call verse-operations edge function for ESV lookup only
+      const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          operation: 'lookup', // Use existing operation type
+          reference,
+          normalizedRef: reference,
+          translation: 'ESV'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`ESV lookup failed: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.verse) {
+        // Cache the verse locally for future use
+        const now = new Date().toISOString();
+        const localVerseData: LocalDBSchema['verses'] = {
+          id: crypto.randomUUID(),
+          reference: result.verse.reference,
+          text: result.verse.text,
+          translation: 'ESV',
+          is_verified: true,
+          created_at: now,
+          updated_at: now
+        };
+        await db.verses.add(localVerseData);
+        
+        const localVerse = localVerseData;
+
+        return { success: true, verse: localVerse };
+      }
+
+      return { success: false };
+    } catch (error) {
+      console.error('ESV lookup error:', error);
+      return { success: false };
+    }
+  },
+
+  /**
+   * Manual phase change with smart assignment recalculation
+   * Handles phase progression with automatic due date and assignment updates
+   */
+  async changeVersePhase(
+    verseCardId: string, 
+    newPhase: 'daily' | 'weekly' | 'biweekly' | 'monthly',
+    userId: string,
+    accessToken?: string
+  ): Promise<DualWriteResult<LocalDBSchema['verse_cards']>> {
+
+    const result: DualWriteResult<LocalDBSchema['verse_cards']> = {
+      success: false,
+      local: null,
+      remote: null,
+      errors: {}
+    };
+
+    try {
+      let updatedCard: LocalDBSchema['verse_cards'] | undefined;
+      
+      // Get user profile for timezone BEFORE transaction
+      const userProfile = await db.user_profiles.where('user_id').equals(userId).first();
+      const userTimezone = userProfile?.timezone || 'UTC';
+
+      // Calculate smart assignment BEFORE transaction (if needed)
+      const assignment = newPhase === 'daily' 
+        ? { day_of_week: null, week_parity: null, day_of_month: null }
+        : await this.calculateSmartAssignment(userId, newPhase);
+      
+      const nextDueDate = this.calculateNextDueDate(newPhase, assignment, userTimezone);
+      
+      // Step 1: Update locally with smart assignment
+      await db.transaction('rw', [db.verse_cards], async (tx) => {
+        const existingCard = await tx.verse_cards.get(verseCardId);
+        if (!existingCard) {
+          throw new Error(`Verse card not found: ${verseCardId}`);
+        }
+
+        const updateData = {
+          current_phase: newPhase,
+          phase_progress_count: 0, // Reset progress for new phase
+          next_due_date: nextDueDate,
+          assigned_day_of_week: assignment.day_of_week,
+          assigned_week_parity: assignment.week_parity,  
+          assigned_day_of_month: assignment.day_of_month,
+          updated_at: new Date().toISOString()
+        };
+
+        await tx.verse_cards.update(verseCardId, updateData);
+        updatedCard = { ...existingCard, ...updateData };
+      });
+
+      result.local = updatedCard!;
+
+      // Step 2: Sync to cloud (graceful degradation)
+      if (accessToken) {
+        try {
+          console.log('🔄 Syncing phase change to remote...');
+          
+          // Find remote card by user_id + verse_id (since local and remote IDs differ)
+          const { data: remoteCards, error: findError } = await supabaseClient
+            .from('verse_cards')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('verse_id', updatedCard!.verse_id);
+
+          if (findError) throw findError;
+
+          if (!remoteCards || remoteCards.length === 0) {
+            console.warn('⚠️ No remote verse card found for phase change');
+            return result;
+          }
+
+          const remoteCardId = remoteCards[0].id;
+          console.log('🔍 Found remote card for phase update:', remoteCardId);
+
+          // Update the remote card
+          const { data: remoteCard, error: remoteError } = await supabaseClient
+            .from('verse_cards')
+            .update({
+              current_phase: updatedCard!.current_phase,
+              phase_progress_count: updatedCard!.phase_progress_count,
+              next_due_date: updatedCard!.next_due_date,
+              assigned_day_of_week: updatedCard!.assigned_day_of_week,
+              assigned_week_parity: updatedCard!.assigned_week_parity,
+              assigned_day_of_month: updatedCard!.assigned_day_of_month,
+              updated_at: updatedCard!.updated_at
+            })
+            .eq('id', remoteCardId)
+            .eq('user_id', userId) // Double-check RLS
+            .select()
+            .single();
+
+          if (remoteError) throw remoteError;
+          
+          console.log('✅ Phase change synced to remote successfully');
+          result.remote = remoteCard as LocalDBSchema['verse_cards'];
+        } catch (error) {
+          console.error('❌ Failed to sync phase change to remote:', error);
+          result.errors.remote = new NetworkError(
+            'Failed to sync phase change to remote - changes saved locally',
+            error as Error
+          );
+        }
+      }
+
+      result.success = true;
+      return result;
+    } catch (error) {
+      result.errors.local = error as Error;
+      throw error;
+    }
+  },
+
+  /**
+   * Calculate smart assignment for a user's new phase
+   * Replicates database logic locally for immediate UI updates
+   */
+  async calculateSmartAssignment(userId: string, phase: 'weekly' | 'biweekly' | 'monthly'): Promise<{
+    day_of_week: number | null;
+    week_parity: number | null;
+    day_of_month: number | null;
+  }> {
+    if (phase === 'weekly') {
+      // Find weekday with fewest weekly cards
+      const weekdayCount = new Map<number, number>();
+      for (let day = 1; day <= 7; day++) {
+        weekdayCount.set(day, 0);
+      }
+
+      const weeklyCards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived && card.current_phase === 'weekly')
+        .toArray();
+
+      weeklyCards.forEach(card => {
+        if (card.assigned_day_of_week) {
+          const count = weekdayCount.get(card.assigned_day_of_week) || 0;
+          weekdayCount.set(card.assigned_day_of_week, count + 1);
+        }
+      });
+
+      const optimalDay = Array.from(weekdayCount.entries())
+        .sort((a, b) => a[1] - b[1])[0][0];
+
+      return { day_of_week: optimalDay, week_parity: null, day_of_month: null };
+
+    } else if (phase === 'biweekly') {
+      // Find weekday+parity combo with fewest biweekly cards
+      const comboCount = new Map<string, number>();
+      for (let day = 1; day <= 7; day++) {
+        for (let parity = 0; parity <= 1; parity++) {
+          comboCount.set(`${day}-${parity}`, 0);
+        }
+      }
+
+      const biweeklyCards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived && card.current_phase === 'biweekly')
+        .toArray();
+
+      biweeklyCards.forEach(card => {
+        if (card.assigned_day_of_week !== null && card.assigned_week_parity !== null) {
+          const key = `${card.assigned_day_of_week}-${card.assigned_week_parity}`;
+          const count = comboCount.get(key) || 0;
+          comboCount.set(key, count + 1);
+        }
+      });
+
+      const optimalCombo = Array.from(comboCount.entries())
+        .sort((a, b) => a[1] - b[1])[0][0];
+      const [dayStr, parityStr] = optimalCombo.split('-');
+
+      return { 
+        day_of_week: parseInt(dayStr), 
+        week_parity: parseInt(parityStr), 
+        day_of_month: null 
+      };
+
+    } else if (phase === 'monthly') {
+      // Find day of month with fewest monthly cards
+      const dayCount = new Map<number, number>();
+      for (let day = 1; day <= 28; day++) {
+        dayCount.set(day, 0);
+      }
+
+      const monthlyCards = await db.verse_cards
+        .where('user_id')
+        .equals(userId)
+        .filter(card => !card.archived && card.current_phase === 'monthly')
+        .toArray();
+
+      monthlyCards.forEach(card => {
+        if (card.assigned_day_of_month) {
+          const count = dayCount.get(card.assigned_day_of_month) || 0;
+          dayCount.set(card.assigned_day_of_month, count + 1);
+        }
+      });
+
+      const optimalDay = Array.from(dayCount.entries())
+        .sort((a, b) => a[1] - b[1])[0][0];
+
+      return { day_of_week: null, week_parity: null, day_of_month: optimalDay };
+    }
+
+    return { day_of_week: null, week_parity: null, day_of_month: null };
+  },
+
+  /**
+   * Calculate next due date based on phase and assignment
+   * Replicates database logic locally for immediate UI updates
+   */
+  calculateNextDueDate(
+    phase: 'daily' | 'weekly' | 'biweekly' | 'monthly',
+    assignment: { day_of_week: number | null; week_parity: number | null; day_of_month: number | null },
+    _userTimezone: string = 'UTC'
+  ): string {
+    const today = new Date();
+    
+    if (phase === 'daily') {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return tomorrow.toISOString().split('T')[0];
+    }
+
+    if (phase === 'weekly' && assignment.day_of_week) {
+      const currentDow = today.getDay() || 7; // Convert Sunday=0 to Sunday=7
+      const targetDow = assignment.day_of_week;
+      let daysAhead = (targetDow - currentDow + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7; // If today, schedule for next week
+      
+      const nextDate = new Date(today);
+      nextDate.setDate(nextDate.getDate() + daysAhead);
+      return nextDate.toISOString().split('T')[0];
+    }
+
+    if (phase === 'biweekly' && assignment.day_of_week && assignment.week_parity !== null) {
+      let nextDate = new Date(today);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      // Find next occurrence of weekday + week parity
+      for (let i = 0; i < 14; i++) {
+        const dow = nextDate.getDay() || 7;
+        const weeksSinceEpoch = Math.floor(nextDate.getTime() / (1000 * 60 * 60 * 24 * 7));
+        const weekParity = weeksSinceEpoch % 2;
+        
+        if (dow === assignment.day_of_week && weekParity === assignment.week_parity) {
+          return nextDate.toISOString().split('T')[0];
+        }
+        nextDate.setDate(nextDate.getDate() + 1);
+      }
+    }
+
+    if (phase === 'monthly' && assignment.day_of_month) {
+      const nextMonth = new Date(today.getFullYear(), today.getMonth(), assignment.day_of_month);
+      if (nextMonth <= today) {
+        nextMonth.setMonth(nextMonth.getMonth() + 1);
+      }
+      return nextMonth.toISOString().split('T')[0];
+    }
+
+    // Fallback
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  },
+
+  /**
+   * Updates a verse card remotely (for syncing local changes to cloud)
+   */
+  async updateVerseCardRemote(
+    cardId: string, 
+    updates: Partial<LocalDBSchema['verse_cards']>, 
+    userId: string, 
+    _accessToken: string
+  ): Promise<void> {
+    console.log('🔄 Updating verse card remotely:', {
+      cardId: cardId.slice(0, 8) + '...',
+      updates,
+      userId: userId.slice(0, 8) + '...'
+    });
+
+    try {
+      // Find the remote card by local card reference (we need to match by user_id + verse_id)
+      const localCard = await db.verse_cards.get(cardId);
+      if (!localCard) {
+        throw new Error('Local verse card not found');
+      }
+
+      // Find remote card by user_id + verse_id
+      const { data: remoteCards, error: findError } = await supabaseClient
+        .from('verse_cards')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('verse_id', localCard.verse_id);
+
+      if (findError) {
+        throw findError;
+      }
+
+      if (!remoteCards || remoteCards.length === 0) {
+        console.warn('⚠️ No remote verse card found to update');
+        return;
+      }
+
+      const remoteCardId = remoteCards[0].id;
+      console.log('🔍 Found remote card to update:', remoteCardId);
+
+      // Update remote card using supabase helper
+      const { error: updateError } = await supabaseDb.verseCards.update(remoteCardId, {
+        ...updates,
+        updated_at: new Date().toISOString()
+      }, userId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      console.log('✅ Remote verse card updated successfully');
+    } catch (error) {
+      console.error('❌ Failed to update verse card remotely:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Completes email verification by updating user profile
+   * Called after successful email verification from AuthContext
+   */
+  /**
+   * Smart merge strategy for verse cards to prevent data loss
+   * Uses field-specific logic to resolve conflicts intelligently
+   */
+  async smartMergeVerseCard(
+    localCard: LocalDBSchema['verse_cards'], 
+    remoteCard: any
+  ): Promise<{
+    hasChanges: boolean;
+    mergedData: Partial<LocalDBSchema['verse_cards']>;
+    conflicts: string[];
+  }> {
+    const conflicts: string[] = [];
+    const mergedData: Partial<LocalDBSchema['verse_cards']> = {};
+    let hasChanges = false;
+
+    const localUpdated = new Date(localCard.updated_at);
+    const remoteUpdated = new Date(remoteCard.updated_at || localCard.updated_at);
+
+    // RULE 1: Best Streak - Always take the higher value (user achievement protection)
+    const localBestStreak = localCard.best_streak || 0;
+    const remoteBestStreak = remoteCard.best_streak || 0;
+    if (localBestStreak !== remoteBestStreak) {
+      const maxStreak = Math.max(localBestStreak, remoteBestStreak);
+      mergedData.best_streak = maxStreak;
+      hasChanges = true;
+      
+      if (maxStreak !== remoteBestStreak) {
+        conflicts.push(`best_streak: kept local ${localBestStreak} over remote ${remoteBestStreak}`);
+      }
+    }
+
+    // RULE 2: Current Streak - Take the more recent one, but validate against review logs
+    if (localCard.current_streak !== remoteCard.current_streak) {
+      if (remoteUpdated > localUpdated) {
+        mergedData.current_streak = remoteCard.current_streak;
+        hasChanges = true;
+        conflicts.push(`current_streak: used remote ${remoteCard.current_streak} over local ${localCard.current_streak} (newer)`);
+      }
+      // Keep local if it's newer (already handled by not updating)
+    }
+
+    // RULE 3: Phase Progression - Take the more advanced phase or more recent change
+    const phaseOrder = { 'daily': 0, 'weekly': 1, 'biweekly': 2, 'monthly': 3 };
+    const localPhaseLevel = phaseOrder[localCard.current_phase];
+    const remotePhaseLevel = phaseOrder[remoteCard.current_phase as keyof typeof phaseOrder];
+    
+    if (localCard.current_phase !== remoteCard.current_phase) {
+      // If phases are different, use more advanced phase unless remote is much newer
+      const timeDiffHours = (remoteUpdated.getTime() - localUpdated.getTime()) / (1000 * 60 * 60);
+      
+      if (remotePhaseLevel > localPhaseLevel || (remotePhaseLevel >= localPhaseLevel && timeDiffHours > 1)) {
+        mergedData.current_phase = remoteCard.current_phase;
+        mergedData.phase_progress_count = remoteCard.phase_progress_count;
+        hasChanges = true;
+        conflicts.push(`phase: used remote ${remoteCard.current_phase} over local ${localCard.current_phase}`);
+      }
+    }
+
+    // RULE 4: Review Timestamps - Take the most recent review
+    const localLastReview = localCard.last_reviewed_at ? new Date(localCard.last_reviewed_at) : null;
+    const remoteLastReview = remoteCard.last_reviewed_at ? new Date(remoteCard.last_reviewed_at) : null;
+    
+    if (localLastReview && remoteLastReview) {
+      if (remoteLastReview > localLastReview) {
+        mergedData.last_reviewed_at = remoteCard.last_reviewed_at;
+        hasChanges = true;
+      }
+    } else if (remoteLastReview && !localLastReview) {
+      mergedData.last_reviewed_at = remoteCard.last_reviewed_at;
+      hasChanges = true;
+    }
+
+    // RULE 5: Due Dates - Use the earlier due date (more conservative approach)
+    if (localCard.next_due_date !== remoteCard.next_due_date) {
+      const localDue = new Date(localCard.next_due_date);
+      const remoteDue = new Date(remoteCard.next_due_date);
+      
+      if (remoteDue < localDue) {
+        mergedData.next_due_date = remoteCard.next_due_date;
+        hasChanges = true;
+        conflicts.push(`next_due_date: used earlier remote date ${remoteCard.next_due_date} over local ${localCard.next_due_date}`);
+      }
+    }
+
+    // RULE 6: Assignments - Prefer remote if it's newer by significant margin
+    const timeDiffHours = (remoteUpdated.getTime() - localUpdated.getTime()) / (1000 * 60 * 60);
+    if (timeDiffHours > 1) { // More than 1 hour difference
+      if (localCard.assigned_day_of_week !== remoteCard.assigned_day_of_week) {
+        mergedData.assigned_day_of_week = remoteCard.assigned_day_of_week;
+        hasChanges = true;
+      }
+      if (localCard.assigned_week_parity !== remoteCard.assigned_week_parity) {
+        mergedData.assigned_week_parity = remoteCard.assigned_week_parity;
+        hasChanges = true;
+      }
+      if (localCard.assigned_day_of_month !== remoteCard.assigned_day_of_month) {
+        mergedData.assigned_day_of_month = remoteCard.assigned_day_of_month;
+        hasChanges = true;
+      }
+    }
+
+    // RULE 7: Archive Status - Take the most recent
+    if (localCard.archived !== remoteCard.archived) {
+      if (remoteUpdated > localUpdated) {
+        mergedData.archived = remoteCard.archived;
+        hasChanges = true;
+        conflicts.push(`archived: used remote ${remoteCard.archived} over local ${localCard.archived} (newer)`);
+      }
+    }
+
+    // Always update timestamp to the latest
+    if (hasChanges) {
+      mergedData.updated_at = new Date().toISOString();
+    }
+
+    return { hasChanges, mergedData, conflicts };
+  },
+
+  /**
+   * Ensures a user profile exists both locally and remotely
+   * Creates the profile with default values if it doesn't exist
+   */
+  async ensureUserProfile(userId: string, userData?: {
+    email?: string | null;
+    full_name?: string | null;
+    timezone?: string;
+  }): Promise<void> {
+    console.log('🔄 Ensuring user profile exists for user:', userId.slice(0, 8) + '...');
+    
+    try {
+      // Get current user from Supabase to extract metadata
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const userEmail = userData?.email || user?.email || null;
+      const userFullName = userData?.full_name || user?.user_metadata?.full_name || (userEmail ? userEmail.split('@')[0] : null);
+      const userTimezone = userData?.timezone || user?.user_metadata?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      
+      // Create/update profile using UPSERT logic
+      await this.updateUserProfile(userId, {
+        email: userEmail,
+        full_name: userFullName,
+        timezone: userTimezone,
+        preferred_translation: 'ESV',
+        reference_display_mode: 'full'
+      });
+      
+      console.log('✅ User profile ensured successfully');
+    } catch (error) {
+      console.error('❌ Failed to ensure user profile:', error);
+      throw error;
+    }
+  },
+
+  async completeEmailVerification(userId: string, email: string): Promise<void> {
+    console.log('🔄 Starting email verification completion:', {
+      userId: userId.slice(0, 8) + '...',
+      email: email
+    });
+
+    try {
+      // Step 1: Update user profile in remote database to clear pending verification
+      console.log('🔄 Clearing pending email verification status remotely...');
+      const { error: remoteError } = await supabaseClient
+        .from('user_profiles')
+        .update({
+          email: email,
+          pending_email_verification: null,
+          email_verification_sent_at: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId);
+
+      if (remoteError) {
+        console.error('❌ Failed to update remote profile after email verification:', remoteError);
+        throw remoteError;
+      }
+
+      console.log('✅ Remote profile updated after email verification');
+
+      // Step 2: Sync the updated profile back to local database
+      console.log('🔄 Syncing updated profile to local database...');
+      await this.syncUserProfile(userId);
+      
+      console.log('✅ Email verification completion successful');
+    } catch (error) {
+      console.error('❌ Failed to complete email verification:', error);
       throw error;
     }
   }

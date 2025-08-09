@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { useAuth } from "../contexts/AuthContext";
 import { MobileNavigation } from '../components/MobileNavigation/MobileNavigation';
 import { Review } from '../pages/Review/Review';
@@ -29,17 +29,15 @@ export function AppRouter() {
       {/* Main content area */}
       <main className="flex-1 overflow-y-auto" style={{ paddingBottom: '57px' }}>
         <Routes>
-          {/* Default route redirects to review */}
-          <Route path="/" element={<Navigate to="/review" replace />} />
-
           {/* Main app routes - available in all modes */}
+          <Route path="/" element={<Review />} />
           <Route path="/review" element={<Review />} />
           <Route path="/library" element={<Library />} />
           <Route path="/add" element={<AddVerse />} />
           <Route path="/settings" element={<Settings />} />
           
           {/* Verse details route */}
-          <Route path="/verse/:verseCardId" element={<VerseDetails />} />
+          <Route path="/library/:reference" element={<VerseDetails />} />
 
           {/* Auth route - accessible if needed */}
           <Route path="/auth" element={<Auth />} />

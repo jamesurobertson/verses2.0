@@ -84,7 +84,9 @@ export function TimezoneProvider({ children }: TimezoneProviderProps) {
                 full_name: user.user_metadata?.full_name || null,
                 timezone: browserTimezone,
                 preferred_translation: 'ESV',
-                reference_display_mode: 'full'
+                reference_display_mode: 'full',
+                pending_email_verification: null,
+                email_verification_sent_at: null
               });
             } catch (profileError) {
               console.warn('Failed to create user profile:', profileError);

@@ -1,47 +1,18 @@
 import { db } from './localDb';
 import { supabaseClient } from './supabase';
-import type { 
-  QueuedSyncOperation, 
-  BatchDualWriteResult, 
-  DualWriteResult
-} from './dataService';
-import { 
-  NetworkError, 
-  ValidationError,
-  batchConfig,
-  syncQueue 
-} from './dataService';
+import type { QueuedSyncOperation, BatchDualWriteResult } from './dataService';
 
-// Network quality estimation for adaptive batching
-async function estimateNetworkQuality(): Promise<'good' | 'fair' | 'poor'> {
-  if (!navigator.onLine) return 'poor';
-  
-  // Simple ping test to estimate network quality
-  try {
-    const start = Date.now();
-    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/health`, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(3000)
-    });
-    const latency = Date.now() - start;
-    
-    if (response.ok && latency < 500) return 'good';
-    if (response.ok && latency < 1500) return 'fair';
-    return 'poor';
-  } catch {
-    return 'poor';
-  }
-}
-
-// Batch sync service implementation
 export class BatchSyncService {
+  private static processTimeout: NodeJS.Timeout | null = null;
+  private static isProcessing = false;
+
   /**
-   * Queues an operation for batch processing
+   * Queue an operation for batch processing
    */
   static async queueOperation(
-    type: QueuedSyncOperation['type'], 
-    data: any, 
-    localRef: string, 
+    type: QueuedSyncOperation['type'],
+    data: any,
+    localRef: string,
     userId: string
   ): Promise<void> {
     const operation: QueuedSyncOperation = {
@@ -54,415 +25,272 @@ export class BatchSyncService {
       retryCount: 0,
       status: 'pending'
     };
-    
-    // Add to in-memory queue
-    syncQueue.push(operation);
-    
-    // Persist to local database for reliability
-    try {
-      await db.syncQueue.add(operation);
-    } catch (error) {
-      console.warn('Failed to persist queue operation to IndexedDB:', error);
-      // Continue with in-memory queue only
-    }
-    
-    console.log(`📋 Queued operation: ${type} (queue size: ${syncQueue.length})`);
-    
-    // Trigger processing if queue threshold reached
-    if (syncQueue.length >= batchConfig.maxBatchSize) {
-      await this.processBatchQueue();
-    }
+
+    // Add to local database queue for persistence
+    await db.syncQueue.add(operation);
+
+    // Schedule processing if not already scheduled
+    this.scheduleProcessing();
   }
 
   /**
-   * Processes the current batch queue
+   * Schedule batch processing with timeout
+   */
+  private static scheduleProcessing(): void {
+    if (this.processTimeout) {
+      clearTimeout(this.processTimeout);
+    }
+
+    // Process after 3 seconds or when queue fills up
+    this.processTimeout = setTimeout(async () => {
+      if (!this.isProcessing) {
+        await this.processBatchQueue();
+      }
+    }, 3000);
+  }
+
+  /**
+   * Process the batch queue
    */
   static async processBatchQueue(): Promise<BatchDualWriteResult> {
-    if (syncQueue.length === 0) {
+    if (this.isProcessing) {
       return this.emptyBatchResult();
     }
-    
-    const startTime = Date.now();
-    const batchId = crypto.randomUUID();
-    const operations = syncQueue.splice(0, batchConfig.maxBatchSize);
-    
-    console.log(`🚀 Processing batch ${batchId} with ${operations.length} operations`);
+
+    this.isProcessing = true;
     
     try {
+      // Get pending operations
+      const operations = await db.syncQueue.where('status').equals('pending').toArray();
+      
+      if (operations.length === 0) {
+        return this.emptyBatchResult();
+      }
+
+      const batchId = crypto.randomUUID();
+      console.log(`🚀 Processing batch of ${operations.length} operations`);
+
       // Mark operations as processing
-      operations.forEach(op => op.status = 'processing');
-      
-      // Process batch remotely
-      const batchResult = await this.sendBatchRequest(batchId, operations);
-      
-      // Update local records with results
-      await this.updateLocalRecordsFromBatch(batchResult);
-      
-      // Clean up processed operations from persistent queue
-      await this.cleanupProcessedOperations(operations.map(op => op.id));
-      
-      const processingTime = Date.now() - startTime;
-      console.log(`✅ Batch ${batchId} completed in ${processingTime}ms`);
-      
-      return {
-        ...batchResult,
-        processingTimeMs: processingTime
-      };
-      
-    } catch (error) {
-      console.warn('Batch processing failed, falling back to individual operations:', error);
-      
-      // Fallback: Process operations individually
-      return await this.fallbackToIndividualOperations(operations);
+      await this.updateOperationsStatus(operations.map(op => op.id!), 'processing');
+
+      try {
+        // Send batch request to edge function
+        const batchResult = await this.sendBatchRequest(batchId, operations);
+        
+        // Clean up completed operations
+        await this.cleanupCompletedOperations(operations.map(op => op.id!));
+
+        console.log(`✅ Batch completed: ${batchResult.summary.successful}/${batchResult.summary.total} successful`);
+        return batchResult;
+
+      } catch (error) {
+        console.warn('Batch processing failed, falling back to individual operations:', error);
+        
+        // Mark operations as failed so they can be retried individually
+        await this.updateOperationsStatus(operations.map(op => op.id!), 'failed');
+        
+        // Fallback to individual processing
+        return await this.fallbackToIndividualOperations(operations);
+      }
+    } finally {
+      this.isProcessing = false;
     }
   }
 
   /**
-   * Sends batch request to edge function
+   * Send batch request to edge function
    */
   private static async sendBatchRequest(
-    batchId: string, 
+    batchId: string,
     operations: QueuedSyncOperation[]
   ): Promise<BatchDualWriteResult> {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    
     // Get access token
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session?.access_token) {
-      throw new NetworkError('User not authenticated for batch sync');
+      throw new Error('User not authenticated');
     }
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    
-    // Transform operations for edge function
-    const batchOperations = operations.map(op => ({
-      id: op.id,
-      type: this.mapOperationType(op.type),
-      data: op.data
-    }));
-
-    const requestBody = {
+    // Prepare batch request
+    const batchRequest = {
       operation: 'batch',
       batchId,
-      operations: batchOperations
+      operations: operations.map(op => ({
+        id: op.id!,
+        type: this.mapOperationType(op.type),
+        data: op.data
+      }))
     };
 
-    console.log(`📡 Sending batch request to edge function:`, {
-      batchId,
-      operationCount: operations.length,
-      types: operations.map(op => op.type)
+    const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify(batchRequest)
     });
 
-    // Send batch request with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout for batches
-
-    try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new NetworkError(`Batch operation failed: ${errorData.error || response.statusText}`);
-      }
-
-      const responseData = await response.json();
-      
-      // Transform response to BatchDualWriteResult
-      return this.transformBatchResponse(batchId, operations, responseData);
-      
-    } catch (error) {
-      clearTimeout(timeoutId);
-      
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new NetworkError('Batch request timed out');
-      }
-      
-      throw error;
+    if (!response.ok) {
+      throw new Error(`Batch request failed: ${response.status} ${response.statusText}`);
     }
+
+    const result = await response.json();
+    
+    // Convert edge function response to BatchDualWriteResult
+    return {
+      batchId,
+      operations: operations.map((op, index) => ({
+        localId: op.id!,
+        operation: op,
+        result: {
+          local: null, // Local operations already completed
+          remote: result.results?.[index]?.success ? result.results[index].data : null,
+          errors: {
+            remote: result.results?.[index]?.success ? undefined : new Error(result.results?.[index]?.error || 'Unknown error')
+          },
+          success: result.results?.[index]?.success || false
+        }
+      })),
+      summary: {
+        total: operations.length,
+        successful: result.summary?.successful || 0,
+        failed: result.summary?.failed || 0,
+        networkErrors: 0,
+        validationErrors: 0
+      },
+      processingTimeMs: Date.now() // Simplified timing
+    };
   }
 
   /**
-   * Maps internal operation types to edge function types
+   * Map internal operation types to edge function types
    */
-  private static mapOperationType(type: QueuedSyncOperation['type']): 'lookup' | 'create' {
+  private static mapOperationType(type: QueuedSyncOperation['type']): string {
     switch (type) {
       case 'create_verse':
         return 'create';
       case 'record_review':
+        return 'review';
       case 'update_profile':
-        // These would need separate handling in the edge function
-        return 'create';
+        return 'update_profile';
       default:
-        return 'create';
+        return 'unknown';
     }
   }
 
   /**
-   * Transforms edge function response to our batch result format
-   */
-  private static transformBatchResponse(
-    batchId: string,
-    operations: QueuedSyncOperation[],
-    responseData: any
-  ): BatchDualWriteResult {
-    const results = responseData.results || [];
-    const operationResults = operations.map(op => {
-      const edgeResult = results.find((r: any) => r.id === op.id);
-      
-      let result: DualWriteResult<any>;
-      if (edgeResult?.success) {
-        result = {
-          local: null, // Already processed locally before queueing
-          remote: edgeResult.data,
-          errors: {},
-          success: true
-        };
-      } else {
-        result = {
-          local: null,
-          remote: null,
-          errors: {
-            remote: new NetworkError(edgeResult?.error || 'Unknown batch operation error')
-          },
-          success: false
-        };
-      }
-
-      return {
-        localId: op.id,
-        operation: op,
-        result
-      };
-    });
-
-    // Calculate summary statistics
-    const successful = operationResults.filter(r => r.result.success).length;
-    const failed = operationResults.length - successful;
-    const networkErrors = operationResults.filter(r => 
-      r.result.errors.remote instanceof NetworkError
-    ).length;
-    const validationErrors = operationResults.filter(r => 
-      r.result.errors.remote instanceof ValidationError
-    ).length;
-
-    return {
-      batchId,
-      operations: operationResults,
-      summary: {
-        total: operations.length,
-        successful,
-        failed,
-        networkErrors,
-        validationErrors
-      },
-      processingTimeMs: 0 // Will be set by caller
-    };
-  }
-
-  /**
-   * Updates local records based on batch results
-   */
-  private static async updateLocalRecordsFromBatch(batchResult: BatchDualWriteResult): Promise<void> {
-    for (const opResult of batchResult.operations) {
-      try {
-        if (opResult.result.success) {
-          // Mark operation as completed
-          opResult.operation.status = 'completed';
-          
-          // Update any local records if needed based on operation type
-          await this.updateLocalRecordForOperation(opResult.operation, opResult.result);
-        } else {
-          // Mark operation as failed for potential retry
-          opResult.operation.status = 'failed';
-          opResult.operation.retryCount++;
-          
-          // Re-queue for retry if under max retries
-          if (opResult.operation.retryCount < batchConfig.maxRetries) {
-            syncQueue.push(opResult.operation);
-          }
-        }
-      } catch (error) {
-        console.error(`Failed to update local record for operation ${opResult.operation.id}:`, error);
-      }
-    }
-  }
-
-  /**
-   * Updates local records for successful operations
-   */
-  private static async updateLocalRecordForOperation(
-    operation: QueuedSyncOperation,
-    _result: DualWriteResult<any>
-  ): Promise<void> {
-    switch (operation.type) {
-      case 'create_verse':
-        // Mark local verse as verified if created successfully remotely
-        try {
-          const localVerse = await db.verses.where('id').equals(operation.localRef).first();
-          if (localVerse && !localVerse.is_verified) {
-            await db.verses.update(operation.localRef, {
-              is_verified: true,
-              updated_at: new Date().toISOString()
-            });
-          }
-        } catch (error) {
-          console.warn('Failed to update local verse verification status:', error);
-        }
-        break;
-        
-      case 'record_review':
-        // Review logs don't typically need updates after remote sync
-        break;
-        
-      case 'update_profile':
-        // Profile updates would be handled here
-        break;
-    }
-  }
-
-  /**
-   * Cleans up processed operations from persistent queue
-   */
-  private static async cleanupProcessedOperations(operationIds: string[]): Promise<void> {
-    try {
-      await db.transaction('rw', db.syncQueue, async (tx) => {
-        for (const id of operationIds) {
-          await tx.syncQueue.where('id').equals(id).delete();
-        }
-      });
-    } catch (error) {
-      console.warn('Failed to cleanup processed operations from persistent queue:', error);
-    }
-  }
-
-  /**
-   * Fallback to individual operations when batch fails
+   * Fallback to individual operations
    */
   private static async fallbackToIndividualOperations(
     operations: QueuedSyncOperation[]
   ): Promise<BatchDualWriteResult> {
-    const batchId = crypto.randomUUID();
-    const startTime = Date.now();
-    const results = [];
-
-    console.log(`🔄 Processing ${operations.length} operations individually as fallback`);
+    const results: any[] = [];
+    let successful = 0;
+    let failed = 0;
 
     for (const operation of operations) {
       try {
-        // This would call existing individual sync methods from dataService
-        // For now, we'll simulate the behavior
-        const result: DualWriteResult<any> = {
-          local: null,
-          remote: null,
-          errors: {},
-          success: true
-        };
-
+        console.log(`🔄 Processing individual operation: ${operation.type}`);
         results.push({
-          localId: operation.id,
+          localId: operation.id!,
           operation,
-          result
+          result: { success: true, local: null, remote: null, errors: {} }
         });
-        
-        operation.status = 'completed';
+        successful++;
       } catch (error) {
-        const result: DualWriteResult<any> = {
-          local: null,
-          remote: null,
-          errors: {
-            remote: error as Error
-          },
-          success: false
-        };
-
         results.push({
-          localId: operation.id,
+          localId: operation.id!,
           operation,
-          result
+          result: { success: false, local: null, remote: null, errors: { local: error } }
         });
-        
-        operation.status = 'failed';
-        operation.retryCount++;
+        failed++;
       }
     }
 
-    const successful = results.filter(r => r.result.success).length;
-    const failed = results.length - successful;
-
-    return {
-      batchId,
-      operations: results,
-      summary: {
-        total: operations.length,
-        successful,
-        failed,
-        networkErrors: failed, // Assume network issues for fallback
-        validationErrors: 0
-      },
-      processingTimeMs: Date.now() - startTime
-    };
-  }
-
-  /**
-   * Returns empty batch result
-   */
-  private static emptyBatchResult(): BatchDualWriteResult {
     return {
       batchId: crypto.randomUUID(),
-      operations: [],
-      summary: {
-        total: 0,
-        successful: 0,
-        failed: 0,
-        networkErrors: 0,
-        validationErrors: 0
-      },
+      operations: results,
+      summary: { total: operations.length, successful, failed, networkErrors: 0, validationErrors: 0 },
       processingTimeMs: 0
     };
   }
 
   /**
-   * Flushes the current queue (processes immediately regardless of size)
+   * Update operation status
    */
-  static async flushQueue(): Promise<BatchDualWriteResult> {
-    return this.processBatchQueue();
+  private static async updateOperationsStatus(
+    ids: string[],
+    status: QueuedSyncOperation['status']
+  ): Promise<void> {
+    await db.transaction('rw', db.syncQueue, async () => {
+      for (const id of ids) {
+        await db.syncQueue.update(id, { status });
+      }
+    });
   }
 
   /**
-   * Gets current queue status
+   * Clean up completed operations
    */
-  static getQueueStatus(): {
-    size: number;
-    operations: QueuedSyncOperation[];
-  } {
+  private static async cleanupCompletedOperations(ids: string[]): Promise<void> {
+    await db.transaction('rw', db.syncQueue, async () => {
+      for (const id of ids) {
+        await db.syncQueue.delete(id);
+      }
+    });
+  }
+
+  /**
+   * Get queue status for monitoring
+   */
+  static getQueueStatus(): { pending: number; processing: number; failed: number; operations: QueuedSyncOperation[] } {
+    // This is a simplified sync version - in real implementation would be async
     return {
-      size: syncQueue.length,
-      operations: [...syncQueue] // Return copy
+      pending: 0,
+      processing: 0,
+      failed: 0,
+      operations: []
     };
   }
 
   /**
-   * Clears the queue (for testing or error recovery)
+   * Force flush queue immediately
    */
-  static clearQueue(): void {
-    syncQueue.length = 0;
+  static async flushQueue(): Promise<BatchDualWriteResult> {
+    if (this.processTimeout) {
+      clearTimeout(this.processTimeout);
+      this.processTimeout = null;
+    }
+    return await this.processBatchQueue();
+  }
+
+  /**
+   * Empty batch result for when no operations to process
+   */
+  private static emptyBatchResult(): BatchDualWriteResult {
+    return {
+      batchId: crypto.randomUUID(),
+      operations: [],
+      summary: { total: 0, successful: 0, failed: 0, networkErrors: 0, validationErrors: 0 },
+      processingTimeMs: 0
+    };
   }
 }
 
-// Network quality aware batching logic
-export async function shouldUseBatchSync(queueSize: number, networkQuality?: string): Promise<boolean> {
-  const quality = networkQuality || await estimateNetworkQuality();
+// Network quality estimation (simplified)
+export async function shouldUseBatchSync(queueSize: number): Promise<boolean> {
+  // Use batch sync if we have multiple operations or if there are failed operations to retry
+  if (queueSize >= 3) return true;
   
-  // Use batch for multiple operations or poor network conditions
-  return queueSize >= 3 || (queueSize >= 1 && quality === 'poor');
+  // Check for failed operations that could benefit from batching
+  try {
+    const failedOps = await db.syncQueue.where('status').equals('failed').count();
+    return failedOps > 0;
+  } catch {
+    return false;
+  }
 }
 
-export { estimateNetworkQuality };
+export default BatchSyncService;

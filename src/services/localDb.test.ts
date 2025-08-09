@@ -94,6 +94,8 @@ describe('localDb', () => {
         timezone: 'UTC',
         preferred_translation: 'ESV',
         reference_display_mode: 'full',
+        pending_email_verification: null,
+        email_verification_sent_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

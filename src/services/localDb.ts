@@ -12,6 +12,8 @@ export interface LocalDBSchema {
     timezone: string;              // User's timezone for assignment calculations
     preferred_translation: string; // Default 'ESV'
     reference_display_mode: string; // 'full' | 'first' | 'blank'
+    pending_email_verification: string | null; // Email address pending verification
+    email_verification_sent_at: string | null; // When verification email was sent
     created_at: string;
     updated_at: string;
   };
@@ -109,6 +111,22 @@ db.version(13).stores({
   aliases: 'id, alias, verse_id, [alias], [verse_id]',
   review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]',
   syncQueue: 'id, userId, type, status, queuedAt, [userId+type], [status]'
+})
+
+// Version 14: Add email verification tracking to user_profiles
+db.version(14).stores({
+  user_profiles: 'id, user_id, timezone, pending_email_verification, email_verification_sent_at, [user_id]',
+  verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
+  verses: 'id, reference, translation, is_verified, [reference+translation]',
+  aliases: 'id, alias, verse_id, [alias], [verse_id]',
+  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id]',
+  syncQueue: 'id, userId, type, status, queuedAt, [userId+type], [status]'
+}).upgrade(tx => {
+  // Add default values for new fields
+  return tx.table('user_profiles').toCollection().modify(profile => {
+    profile.pending_email_verification = null;
+    profile.email_verification_sent_at = null;
+  });
 })
 
 // Database hooks for auto-timestamps, UUIDs, and validation
@@ -226,6 +244,13 @@ export const localDb = {
 
     async findById(id: string) {
       return db.verses.get(id);
+    },
+
+    async findByReferenceExact(reference: string, translation: string = 'ESV') {
+      return db.verses
+        .where('[reference+translation]')
+        .equals([reference, translation])
+        .first();
     }
   },
 
@@ -302,29 +327,60 @@ export const localDb = {
     },
 
     async getByUser(userId: string) {
-      return db.verse_cards
+      const cards = await db.verse_cards
         .where('user_id')
         .equals(userId)
         .filter(card => !card.archived)
         .toArray();
+      
+      // Don't filter by validation error here - Library needs to show invalid verses 
+      // Only filter in review-related methods (getDue, getReviewedToday)
+      return cards;
     },
 
     async getDue(userId: string) {
       const today = new Date().toISOString().split('T')[0];
-      return db.verse_cards
+      const cards = await db.verse_cards
         .where('user_id')
         .equals(userId)
         .filter(card => !card.archived && card.next_due_date <= today)
         .toArray();
+      
+      // Filter out cards with invalid verses (validation errors)
+      const validCards = [];
+      for (const card of cards) {
+        const verse = await db.verses.get(card.verse_id);
+        // Only include verses that don't have validation errors
+        if (verse && !verse.validation_error) {
+          validCards.push(card);
+        }
+      }
+      return validCards;
     },
 
     async get(id: string) {
       return db.verse_cards.get(id);
     },
 
+    async findByUserAndReference(userId: string, reference: string, translation: string = 'ESV'): Promise<LocalDBSchema['verse_cards'] | undefined> {
+      // First find the verse by reference
+      const verse = await db.verses
+        .where('[reference+translation]')
+        .equals([reference, translation])
+        .first();
+      
+      if (!verse) return undefined;
+      
+      // Then find the user's card for this verse
+      return db.verse_cards
+        .where('[user_id+verse_id]')
+        .equals([userId, verse.id!])
+        .first();
+    },
+
     async getReviewedToday(userId: string) {
       const today = new Date().toISOString().split('T')[0];
-      return db.verse_cards
+      const cards = await db.verse_cards
         .where('user_id')
         .equals(userId)
         .filter(card => {
@@ -333,6 +389,17 @@ export const localDb = {
             card.last_reviewed_at.split('T')[0] === today;
         })
         .toArray();
+        
+      // Filter out cards with invalid verses (validation errors)
+      const validCards = [];
+      for (const card of cards) {
+        const verse = await db.verses.get(card.verse_id);
+        // Only include verses that don't have validation errors
+        if (verse && !verse.validation_error) {
+          validCards.push(card);
+        }
+      }
+      return validCards;
     }
   },
 

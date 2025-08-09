@@ -9,6 +9,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { dataService, DuplicateVerseError, ValidationError, NetworkError } from '../../../services/dataService';
 import { normalizeReferenceForLookup } from '../../../utils/referenceNormalizer';
+import { detectNetworkStatus, isNetworkConnectivityError, getErrorMessage } from '../../../services/networkDetection';
 import type { LocalDBSchema } from '../../../services/localDb';
 
 // Form state interface
@@ -41,7 +42,7 @@ interface UseAddVerseReturn extends AddVerseFormState {
 }
 
 export function useAddVerse(): UseAddVerseReturn {
-  const { getCurrentUserId, getAccessToken } = useAuth();
+  const { getCurrentUserId, getAccessToken, isAuthenticated, isAnonymous, mode, user } = useAuth();
   
   // Form state management
   const [state, setState] = useState<AddVerseFormState>({
@@ -201,7 +202,38 @@ export function useAddVerse(): UseAddVerseReturn {
       // Get current user ID and access token
       const userId = getCurrentUserId();
       const accessToken = await getAccessToken();
-      console.log('🔑 Access token:', accessToken ? 'Found' : 'None');
+      
+      // Debug auth state
+      console.log('🔍 Auth Debug:', {
+        userId: userId ? `Found (${userId.slice(0, 8)}...)` : 'None',
+        accessToken: accessToken ? `Found (${accessToken.slice(0, 20)}...)` : 'None',
+        isAuthenticated,
+        isAnonymous,
+        mode,
+        userExists: !!user
+      });
+
+      // Check authentication state
+      if (!isAuthenticated || !userId) {
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: 'Authentication required. Please wait for automatic sign-in or check your connection.'
+        }));
+        return;
+      }
+
+      // If authenticated but no access token, there might be a session issue
+      if (isAuthenticated && !accessToken) {
+        console.warn('⚠️ Authenticated user has no access token - possible session issue');
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: 'Session issue detected. Please refresh the page or check your internet connection.',
+          showManualEntry: true
+        }));
+        return;
+      }
 
       // Try to add verse using ESV API first (if not already in manual mode)
       if (!state.showManualEntry) {
@@ -231,35 +263,44 @@ export function useAddVerse(): UseAddVerseReturn {
             }
             return;
           }
-        } catch (networkError) {
-          // Check if this is a network-related error
-          const isNetworkError = networkError instanceof NetworkError || 
-                                (networkError instanceof Error && 
-                                 (networkError.message.includes('network') || 
-                                  networkError.message.includes('fetch') ||
-                                  networkError.message.includes('Failed to fetch') ||
-                                  networkError.message.includes('timeout') ||
-                                  networkError.message.includes('Request timed out') ||
-                                  networkError.message.includes('offline') ||
-                                  networkError.message.includes('AbortError') ||
-                                  networkError.message.includes('NetworkError') ||
-                                  // HTTP error status codes that indicate connectivity issues
-                                  networkError.message.includes('500') ||
-                                  networkError.message.includes('502') ||
-                                  networkError.message.includes('503') ||
-                                  networkError.message.includes('504')));
-
-          if (isNetworkError) {
+        } catch (error) {
+          console.error('ESV API Error:', error);
+          
+          // Handle different types of errors appropriately
+          if (error instanceof ValidationError) {
+            // ESV validation error (invalid reference) - don't show manual entry
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              showManualEntry: false,
+              error: error.message
+            }));
+            return;
+          } 
+          
+          // Check if this is a true network connectivity issue
+          const networkStatus = await detectNetworkStatus();
+          const isConnectivityIssue = isNetworkConnectivityError(error, networkStatus);
+          
+          if (isConnectivityIssue || error instanceof NetworkError) {
+            // True network connectivity issue - offer manual entry
             setState(prev => ({
               ...prev,
               isLoading: false,
               showManualEntry: true,
-              error: 'Unable to connect to ESV API. Please enter the verse text manually.'
+              error: 'Connection issue detected. Please check your internet connection or enter the verse text manually.'
             }));
             return;
           } else {
-            // Re-throw non-network errors
-            throw networkError;
+            // Service issue (ESV API down, server errors, etc.) - don't confuse with offline mode
+            const errorMessage = getErrorMessage(error, networkStatus);
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              showManualEntry: false, // Don't show manual entry for service issues
+              error: errorMessage
+            }));
+            return;
           }
         }
       } else {

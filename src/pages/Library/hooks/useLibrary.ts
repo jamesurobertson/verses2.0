@@ -61,6 +61,15 @@ export function useLibrary(): UseLibraryReturn {
       for (const card of localCards) {
         const verse = await localDb.verses.findById(card.verse_id);
         if (verse) {
+          // Debug log to see what we're loading
+          if (verse.validation_error) {
+            console.log('📚 Loading verse with validation error:', {
+              reference: verse.reference,
+              validation_error: verse.validation_error,
+              is_verified: verse.is_verified
+            });
+          }
+          
           libraryCards.push({
             id: card.id!,
             verse: {
@@ -136,6 +145,29 @@ export function useLibrary(): UseLibraryReturn {
   // Load library when user changes
   useEffect(() => {
     refreshLibrary();
+  }, [refreshLibrary]);
+
+  // Refresh library when app becomes visible (e.g., after coming back online)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Page became visible, refresh library to catch any sync updates
+        setTimeout(() => refreshLibrary(), 1000); // Small delay to let sync complete
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [refreshLibrary]);
+
+  // Also refresh on window focus (when user returns to app)
+  useEffect(() => {
+    const handleFocus = () => {
+      setTimeout(() => refreshLibrary(), 1000); // Small delay to let sync complete
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [refreshLibrary]);
 
   // Calculate derived values using assignment-aware logic
