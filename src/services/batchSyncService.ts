@@ -1,5 +1,6 @@
 import { db } from './localDb';
 import { supabaseClient } from './supabase';
+import { v4 as uuidv4 } from 'uuid';
 import type { QueuedSyncOperation, BatchDualWriteResult } from './dataService';
 
 export class BatchSyncService {
@@ -16,7 +17,7 @@ export class BatchSyncService {
     userId: string
   ): Promise<void> {
     const operation: QueuedSyncOperation = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       type,
       data,
       localRef,
@@ -67,7 +68,7 @@ export class BatchSyncService {
         return this.emptyBatchResult();
       }
 
-      const batchId = crypto.randomUUID();
+      const batchId = uuidv4();
       console.log(`🚀 Processing batch of ${operations.length} operations`);
 
       // Mark operations as processing
@@ -210,7 +211,7 @@ export class BatchSyncService {
     }
 
     return {
-      batchId: crypto.randomUUID(),
+      batchId: uuidv4(),
       operations: results,
       summary: { total: operations.length, successful, failed, networkErrors: 0, validationErrors: 0 },
       processingTimeMs: 0
@@ -271,7 +272,7 @@ export class BatchSyncService {
    */
   private static emptyBatchResult(): BatchDualWriteResult {
     return {
-      batchId: crypto.randomUUID(),
+      batchId: uuidv4(),
       operations: [],
       summary: { total: 0, successful: 0, failed: 0, networkErrors: 0, validationErrors: 0 },
       processingTimeMs: 0

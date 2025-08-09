@@ -2,6 +2,7 @@ import { db, type LocalDBSchema } from './localDb';
 import { supabaseClient, db as supabaseDb } from './supabase';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
 import { getTodayString, getUserTodayStringInTimezone } from '../utils/dateUtils';
+import { v4 as uuidv4 } from 'uuid';
 // import { BatchSyncService, shouldUseBatchSync } from './batchSyncService'; // Currently unused
 
 // Dual-write operation result interface
@@ -377,7 +378,7 @@ export const dataService: any = {
           // Add new alias in transaction
           await db.transaction('rw', db.aliases, async (tx) => {
             await tx.aliases.add({
-              id: crypto.randomUUID(),
+              id: uuidv4(),
               alias: normalizedInput,
               verse_id: localVerse!.id!,
               created_at: new Date().toISOString()
@@ -390,7 +391,7 @@ export const dataService: any = {
           await db.transaction('rw', db.verse_cards, async (tx) => {
             const now = new Date().toISOString();
             const cardData: LocalDBSchema['verse_cards'] = {
-              id: crypto.randomUUID(),
+              id: uuidv4(),
               user_id: userId,
               verse_id: localVerse!.id!,
               current_phase: 'daily',
@@ -575,7 +576,7 @@ export const dataService: any = {
       const existingAlias = await tx.aliases.where('alias').equals(alias).first();
       if (!existingAlias) {
         await tx.aliases.add({
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           alias: alias,
           verse_id: localVerseData.id!,
           created_at: now
@@ -584,7 +585,7 @@ export const dataService: any = {
 
       // Create verse_card using data from remote (if provided) or defaults
       const cardData: LocalDBSchema['verse_cards'] = {
-        id: crypto.randomUUID(), // Local ID (different from remote)
+        id: uuidv4(), // Local ID (different from remote)
         user_id: userId,
         verse_id: localVerseData.id!,
         current_phase: remoteUserCard?.current_phase || 'daily',
@@ -649,7 +650,7 @@ export const dataService: any = {
       const existingAlias = await tx.aliases.where('alias').equals(alias).first();
       if (!existingAlias) {
         await tx.aliases.add({
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           alias: alias,
           verse_id: verse.id,
           created_at: now
@@ -658,7 +659,7 @@ export const dataService: any = {
 
       // Create verse_card locally
       const cardData: LocalDBSchema['verse_cards'] = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         user_id: userId,
         verse_id: verse.id,
         current_phase: 'daily',
@@ -765,7 +766,7 @@ export const dataService: any = {
       
       // Create verse locally only
       const localVerseData: LocalDBSchema['verses'] = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         reference: reference,
         text: text,
         translation: 'ESV',
@@ -779,7 +780,7 @@ export const dataService: any = {
       const existingAlias = await tx.aliases.where('alias').equals(alias).first();
       if (!existingAlias) {
         await tx.aliases.add({
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           alias: alias,
           verse_id: localVerseData.id!,
           created_at: now
@@ -788,7 +789,7 @@ export const dataService: any = {
 
       // Create verse_card
       const cardData: LocalDBSchema['verse_cards'] = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         user_id: userId,
         verse_id: localVerseData.id!,
         current_phase: 'daily',
@@ -854,7 +855,7 @@ export const dataService: any = {
         // The database trigger (process_review_comprehensive) handles count_toward_progress logic
         const now = new Date().toISOString();
         const logData: LocalDBSchema['review_logs'] = {
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           user_id: userId,
           verse_card_id: verseCardId,
           was_successful: wasSuccessful,
@@ -1314,7 +1315,7 @@ export const dataService: any = {
             await db.transaction('rw', db.verse_cards, async (tx) => {
               const now = new Date().toISOString();
               const cardData: LocalDBSchema['verse_cards'] = {
-                id: crypto.randomUUID(),
+                id: uuidv4(),
                 user_id: remoteCard.user_id,
                 verse_id: localVerse!.id!,
                 current_phase: remoteCard.current_phase as 'daily' | 'weekly' | 'biweekly' | 'monthly',
@@ -1682,7 +1683,7 @@ export const dataService: any = {
     } catch (error) {
       console.warn('BatchSyncService not available, returning empty result:', error);
       return {
-        batchId: crypto.randomUUID(),
+        batchId: uuidv4(),
         operations: [],
         summary: { total: 0, successful: 0, failed: 0, networkErrors: 0, validationErrors: 0 },
         processingTimeMs: 0
@@ -1814,7 +1815,7 @@ export const dataService: any = {
         // Cache the verse locally for future use
         const now = new Date().toISOString();
         const localVerseData: LocalDBSchema['verses'] = {
-          id: crypto.randomUUID(),
+          id: uuidv4(),
           reference: result.verse.reference,
           text: result.verse.text,
           translation: 'ESV',

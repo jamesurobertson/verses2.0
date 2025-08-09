@@ -9,6 +9,7 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 import { supabaseClient } from '../services/supabase';
 import { dataService } from '../services/dataService';
 
@@ -83,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Create a fallback local user if Supabase anonymous auth fails
       console.log('🔄 Creating fallback local session...');
       const fallbackUser = {
-        id: `local_${crypto.randomUUID()}`,
+        id: `local_${uuidv4()}`,
         is_anonymous: true,
         email: null,
         app_metadata: {},
