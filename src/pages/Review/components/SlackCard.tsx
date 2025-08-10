@@ -230,11 +230,13 @@ export function SlackCard({
             <animated.div
               className="absolute inset-0 rounded-2xl flex items-center justify-center"
               style={{
-                backgroundColor: x.to(val =>
-                  val > 0 && isDragging
-                    ? `rgba(34, 197, 94, 1)`
-                    : 'transparent'
-                ),
+                background: x.to(val => {
+                  if (!isDragging || val <= 0) return 'transparent';
+                  const progress = Math.min(val / 150, 1);
+                  const darkOpacity = 0.4 + (progress * 0.55); // 0.4 to 0.95
+                  const lightOpacity = 0.2 + (progress * 0.5); // 0.2 to 0.7
+                  return `radial-gradient(ellipse 200% 180% at top left, rgba(34, 197, 94, ${darkOpacity}) 0%, rgba(34, 197, 94, ${darkOpacity * 0.9}) 30%, rgba(34, 197, 94, ${lightOpacity}) 70%, rgba(34, 197, 94, ${lightOpacity * 0.3}) 100%)`;
+                }),
                 opacity: x.to(val => val > 0 && isDragging ? 0.05 + (Math.min(val / 150, 1) * 0.9) : 0)
               }}
             >
@@ -256,11 +258,13 @@ export function SlackCard({
             <animated.div
               className="absolute inset-0 rounded-2xl flex items-center justify-center"
               style={{
-                backgroundColor: x.to(val =>
-                  val < 0 && isDragging
-                    ? `rgba(239, 68, 68, 1)`
-                    : 'transparent'
-                ),
+                background: x.to(val => {
+                  if (!isDragging || val >= 0) return 'transparent';
+                  const progress = Math.min(Math.abs(val) / 150, 1);
+                  const darkOpacity = 0.4 + (progress * 0.55); // 0.4 to 0.95
+                  const lightOpacity = 0.2 + (progress * 0.5); // 0.2 to 0.7
+                  return `radial-gradient(ellipse 200% 180% at top right, rgba(239, 68, 68, ${darkOpacity}) 0%, rgba(239, 68, 68, ${darkOpacity * 0.9}) 30%, rgba(239, 68, 68, ${lightOpacity}) 70%, rgba(239, 68, 68, ${lightOpacity * 0.3}) 100%)`;
+                }),
                 opacity: x.to(val => val < 0 && isDragging ? 0.05 + (Math.min(Math.abs(val) / 150, 1) * 0.9) : 0)
               }}
             >
