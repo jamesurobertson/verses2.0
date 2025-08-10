@@ -31,7 +31,7 @@ export function EmptyState({
         <ActionComponent
           href={actionHref}
           onClick={onAction}
-          className="inline-flex items-center px-6 py-3 bg-accent border border-primary/20 rounded-xl hover:bg-accent/90 font-medium transition-colors"
+          className="inline-flex items-center px-6 py-3 bg-accent text-primary border border-primary/20 rounded-xl hover:bg-accent/90 font-medium transition-colors"
         >
           {actionText}
         </ActionComponent>

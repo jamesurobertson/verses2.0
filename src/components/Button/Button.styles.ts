@@ -23,7 +23,7 @@ export const buttonStyles = ({ variant, size, disabled }: ButtonStylesProps): st
   const variantStyles = {
     primary: [
       'bg-accent',
-      'text-white',
+      'text-primary',  // Use dark primary color instead of white for better contrast on gold background
       'hover:bg-accent/90',
       'focus:ring-accent',
       'font-roboto',

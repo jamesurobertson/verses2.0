@@ -333,11 +333,11 @@ export function AddVerse() {
                 !!validationError ||
                 (showManualEntry && !verseText.trim())
               }
-              className="w-full bg-accent hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+              className="w-full bg-accent text-primary hover:bg-accent/90 disabled:bg-primary/20 disabled:cursor-not-allowed font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
             >
               {isLoading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
                   <span>Adding Verse...</span>
                 </>
               ) : (
