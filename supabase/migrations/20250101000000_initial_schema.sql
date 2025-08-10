@@ -143,7 +143,10 @@ CREATE POLICY "Users can view their own review logs" ON public.review_logs
     FOR SELECT USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can create their own review logs" ON public.review_logs
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (
+        (auth.uid() = user_id AND auth.uid() IS NOT NULL) OR
+        (auth.role() = 'authenticated' AND user_id IS NOT NULL)
+    );
 
 CREATE POLICY "Users can delete their own review logs" ON public.review_logs
     FOR DELETE USING (auth.uid() = user_id);
@@ -269,7 +272,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create function to calculate next assigned date
+-- Create function to calculate next assigned date (UPDATED VERSION - MERGED FROM SEPARATE MIGRATION)
 CREATE OR REPLACE FUNCTION calculate_next_assigned_date(
   phase_name TEXT,
   day_of_week_param INTEGER,
@@ -298,6 +301,7 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'Invalid timezone: %', user_timezone;
   END;
+  
   IF phase_name = 'daily' THEN
     RETURN (user_today + INTERVAL '1 day')::DATE;
     
@@ -327,7 +331,7 @@ BEGIN
     RETURN next_date;
     
   ELSIF phase_name = 'monthly' THEN
-    -- Find next occurrence of assigned day of month
+    -- Find next occurrence of assigned day of month using MAKE_DATE for precision
     -- Build the date for this month first
     BEGIN
       next_date := MAKE_DATE(

@@ -11,22 +11,31 @@ import { createPortal } from 'react-dom';
 
 export function Review() {
   const navigate = useNavigate();
-  const { 
-    dueCards, 
+  const {
+    dueCards,
     todaysCards,
-    loading, 
-    error, 
-    sessionActive, 
-    currentCard, 
+    loading,
+    error,
+    sessionActive,
+    currentCard,
     sessionProgress,
-    startReview, 
+    startReview,
     startTodaysReview,
     startIncorrectReview,
-    markCardCorrect, 
-    markCardIncorrect, 
+    markCardCorrect,
+    markCardIncorrect,
     endReview,
     referenceDisplayMode
   } = useReview();
+
+  // Debug logging for rendering issues
+  console.log('Review Component Render:', {
+    sessionActive,
+    currentCard: currentCard ? currentCard.verse.reference : 'null',
+    sessionProgress,
+    willShowCard: sessionActive && currentCard,
+    willShowCompletion: sessionActive && !currentCard && sessionProgress.current > 0
+  });
 
   const handleStartSession = () => {
     startReview();
@@ -82,8 +91,8 @@ export function Review() {
           <div className="text-center p-4">
             <h1 className="text-3xl font-bold text-primary mb-2">Daily Review</h1>
             <p className="text-primary/70 text-lg">
-              {dueCards.length === 0 
-                ? "No cards due for review today! Great job!" 
+              {dueCards.length === 0
+                ? "No cards due for review today! Great job!"
                 : `${dueCards.length} verse${dueCards.length !== 1 ? 's' : ''} ready for review`
               }
             </p>
@@ -96,27 +105,27 @@ export function Review() {
             <div className="text-6xl mb-4">🎉</div>
             <h2 className="text-xl font-semibold text-primary mb-2">All caught up!</h2>
             <p className="text-primary/70 mb-6">
-              {todaysCards.length === 0 
+              {todaysCards.length === 0
                 ? "You haven't reviewed any verses today yet."
                 : `Great work! You've reviewed all your due verses. You reviewed ${todaysCards.length} verse${todaysCards.length !== 1 ? 's' : ''} today.`
               }
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               {todaysCards.length > 0 && (
-                <button 
+                <button
                   onClick={() => startTodaysReview()}
                   className="px-6 py-3 bg-accent text-black rounded-lg font-medium hover:bg-accent/90 transition-colors"
                 >
                   Review Today's Cards ({todaysCards.length})
                 </button>
               )}
-              <button 
+              <button
                 onClick={() => navigate('/library')}
                 className="px-6 py-3 bg-primary text-black rounded-lg font-medium hover:bg-primary/90 transition-colors"
               >
                 View Library
               </button>
-              <button 
+              <button
                 onClick={() => navigate('/add')}
                 className="px-6 py-3 bg-success text-black rounded-lg font-medium hover:bg-success/90 transition-colors"
               >
@@ -130,15 +139,15 @@ export function Review() {
         {!sessionActive && dueCards.length > 0 && (
           <div className="text-center">
             <div className="bg-background rounded-lg shadow-sm border border-primary/10 p-8 mb-6">
-              <button 
+              <button
                 onClick={handleStartSession}
                 className="w-full sm:w-auto px-8 py-4 bg-accent text-black rounded-lg font-medium text-lg hover:bg-accent/90 transition-colors"
               >
                 Start Review Session
               </button>
             </div>
-            
-            <button 
+
+            <button
               onClick={() => navigate('/library')}
               className="text-primary/60 hover:text-primary transition-colors"
             >
@@ -149,10 +158,10 @@ export function Review() {
 
         {/* Full-page review session - Slack-style using Portal */}
         {sessionActive && currentCard && createPortal(
-          <div className="fixed h-full inset-0 bg-background" style={{ zIndex: 10000 }}>
+          <div key={currentCard.id} className="fixed h-full inset-0 bg-background" style={{ zIndex: 10000 }}>
             {/* Header with back arrow */}
             <div className="flex items-center justify-between p-4 border-b border-primary/10">
-              <button 
+              <button
                 onClick={endReview}
                 className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-primary/5 transition-colors"
                 aria-label="Go back"
@@ -190,58 +199,104 @@ export function Review() {
         )}
 
         {/* Session completed automatically when all cards are done */}
-        {sessionActive && !currentCard && sessionProgress.current > sessionProgress.total && (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">🎯</div>
-            <h2 className="text-xl font-semibold text-primary mb-2">Session Complete!</h2>
-            <p className="text-primary/70 mb-6">
+        {sessionActive && !currentCard && sessionProgress.current > 0 && (
+          <div className="text-center py-12 px-4">
+            <div className="text-8xl mb-6">🎉</div>
+            <h2 className="text-2xl font-bold text-primary mb-3">Congratulations!</h2>
+            <p className="text-lg text-primary/80 mb-2">
+              You've completed your review session
+            </p>
+            <p className="text-primary/70 mb-8">
               You got {sessionProgress.correctCount} out of {sessionProgress.total} verses correct.
             </p>
-            
-            {/* Review Again Options */}
-            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-6">
-              <button 
-                onClick={() => {
-                  endReview();
-                  setTimeout(() => startReview(), 100); // Small delay to reset state
-                }}
-                className="px-6 py-3 bg-success text-black rounded-lg font-medium hover:bg-success/90 transition-colors"
-              >
-                Review All Again
-              </button>
-              
-              {sessionProgress.incorrectCount > 0 && (
-                <button 
+
+            {/* Encouragement Message */}
+            <div className="bg-primary/5 rounded-lg p-6 mb-8 max-w-md mx-auto">
+              <p className="text-primary/80 text-center">
+                {sessionProgress.correctCount === sessionProgress.total
+                  ? "Perfect score! 🌟 Your memory work is paying off!"
+                  : sessionProgress.correctCount / sessionProgress.total >= 0.8
+                    ? "Great work! 💪 You're building strong Scripture memory!"
+                    : "Keep going! 📖 Every review strengthens your memory!"
+                }
+              </p>
+            </div>
+
+            {/* Next Steps Options */}
+            <div className="space-y-4 max-w-lg mx-auto">
+              <h3 className="text-lg font-semibold text-primary mb-4">What would you like to do next?</h3>
+
+              <div className="flex flex-col gap-3">
+                {sessionProgress.incorrectCount > 0 && (
+                  <button
+                    onClick={() => {
+                      endReview();
+                      setTimeout(() => startIncorrectReview(), 100);
+                    }}
+                    className="px-6 py-3 bg-accent text-black rounded-lg font-medium hover:bg-accent/90 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span>🔄</span>
+                    Review Incorrect Verses ({sessionProgress.incorrectCount})
+                  </button>
+                )}
+
+                <button
                   onClick={() => {
                     endReview();
-                    setTimeout(() => startIncorrectReview(), 100);
+                    setTimeout(() => startReview(), 100);
                   }}
-                  className="px-6 py-3 bg-accent text-black rounded-lg font-medium hover:bg-accent/90 transition-colors"
+                  className="px-6 py-3 bg-success text-black rounded-lg font-medium hover:bg-success/90 transition-colors flex items-center justify-center gap-2"
                 >
-                  Review Incorrect ({sessionProgress.incorrectCount})
+                  <span>🔄</span>
+                  Review All Verses Again
                 </button>
-              )}
-              
-              <button 
-                onClick={handleSessionComplete}
-                className="px-6 py-3 bg-primary text-black rounded-lg font-medium hover:bg-primary/90 transition-colors"
-              >
-                Return to Library
-              </button>
+
+                <button
+                  onClick={() => navigate('/add')}
+                  className="px-6 py-3 bg-primary text-black rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                >
+                  <span>➕</span>
+                  Add More Verses
+                </button>
+
+                <button
+                  onClick={handleSessionComplete}
+                  className="px-6 py-3 bg-primary/10 text-primary border border-primary/20 rounded-lg font-medium hover:bg-primary/20 transition-colors flex items-center justify-center gap-2"
+                >
+                  <span>📚</span>
+                  Return to Library
+                </button>
+              </div>
+
+              {/* Next Review Info */}
+              <div className="mt-8 p-4 bg-background border border-primary/10 rounded-lg">
+                <p className="text-sm text-primary/70 text-center">
+                  ⏰ Your next review will be available tomorrow based on your spaced repetition schedule
+                </p>
+              </div>
             </div>
-            
+
             {/* Progress Summary */}
-            <div className="bg-background rounded-lg p-4 max-w-md mx-auto border border-primary/10 shadow-sm">
+            <div className="bg-background rounded-lg p-4 max-w-sm mx-auto border border-primary/10 shadow-sm mt-8">
+              <h4 className="font-semibold text-primary mb-3 text-center">Session Results</h4>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-success font-medium">✓ Correct:</span>
                 <span className="font-semibold text-primary">{sessionProgress.correctCount}</span>
               </div>
               {sessionProgress.incorrectCount > 0 && (
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center mb-2">
                   <span className="text-error font-medium">✗ Incorrect:</span>
                   <span className="font-semibold text-primary">{sessionProgress.incorrectCount}</span>
                 </div>
               )}
+              <div className="border-t border-primary/10 pt-2 mt-2">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-primary">Accuracy:</span>
+                  <span className="font-semibold text-primary">
+                    {Math.round((sessionProgress.correctCount / sessionProgress.total) * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}

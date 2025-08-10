@@ -112,6 +112,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false; // Flag to prevent double execution in Strict Mode
     
+    // Helper function to check if current URL contains auth verification tokens
+    const isAuthVerificationCallback = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      
+      // Check for Supabase auth callback parameters (after verification redirect)
+      const hasUrlTokens = !!(
+        urlParams.get('token') || 
+        urlParams.get('type') || 
+        urlParams.get('code')
+      );
+      
+      // Check for auth tokens in hash (common after OAuth or verification)
+      const hasHashTokens = !!(
+        hashParams.get('access_token') || 
+        hashParams.get('refresh_token') ||
+        hashParams.get('type') ||
+        hashParams.get('token_hash')
+      );
+      
+      // Also check if we recently came from a verification URL (within last 10 seconds)
+      const recentVerification = sessionStorage.getItem('auth_verification_redirect');
+      const wasRecentVerification = recentVerification && 
+        (Date.now() - parseInt(recentVerification)) < 10000;
+      
+      const isVerification = hasUrlTokens || hasHashTokens || wasRecentVerification;
+      
+      if (isVerification) {
+        // Mark that we detected a verification flow
+        sessionStorage.setItem('auth_verification_redirect', Date.now().toString());
+        console.log('🔍 Verification callback detected:', { 
+          hasUrlTokens, 
+          hasHashTokens, 
+          wasRecentVerification,
+          url: window.location.href
+        });
+      }
+      
+      return isVerification;
+    };
+    
     // Get initial session
     supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
       console.log('🔄 AuthContext useEffect: session', session);
@@ -125,12 +166,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const user = session?.user ?? null;
       const isAnonymous = user?.is_anonymous ?? false;
+      const isVerificationFlow = isAuthVerificationCallback();
       
-      // If no user exists, sign in anonymously immediately
-      // Let onAuthStateChange handle email verification properly
+      // If no user exists, check if this is a verification callback
       if (!user) {
-        console.log('No existing session found, creating anonymous session...');
-        await performAnonymousSignIn();
+        if (isVerificationFlow) {
+          console.log('📧 Email verification callback detected, waiting for auth state change...');
+          // Don't create anonymous user - let onAuthStateChange handle verification
+          setState(prevState => ({
+            ...prevState,
+            user: null,
+            loading: true, // Keep loading while verification processes
+            isAuthenticated: false,
+            mode: 'anonymous',
+          }));
+        } else {
+          console.log('No existing session found, creating anonymous session...');
+          await performAnonymousSignIn();
+        }
       } else {
         // User already exists (anonymous or authenticated)
         setState(prevState => ({
@@ -185,6 +238,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'TOKEN_REFRESHED' && user && !isAnonymous && user.email_confirmed_at) {
           console.log('✅ Email verification completed, updating user profile...');
           
+          // Clear verification tracking since auth was successful
+          sessionStorage.removeItem('auth_verification_redirect');
+          
           // Update the user profile to complete email verification
           try {
             await dataService.completeEmailVerification(user.id, user.email);
@@ -204,10 +260,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return; // Don't update state here, let performAnonymousSignIn handle it
         }
         
-        // For email verification completion, don't create anonymous user
-        if (!user && (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
-          console.log('⚠️ Auth state change with no user, but not creating anonymous user due to verification flow');
-          // Let the auth state settle naturally
+        // For email verification and other auth flows, don't create anonymous user
+        if (!user && (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION')) {
+          console.log(`⚠️ Auth state change '${event}' with no user, but not creating anonymous user due to auth flow`);
+          // For verification flows, if no user after processing, create anonymous user as fallback
+          if (event === 'TOKEN_REFRESHED') {
+            // Give a small delay to let any ongoing auth processing complete
+            setTimeout(async () => {
+              const { data: { session: currentSession } } = await supabaseClient.auth.getSession();
+              if (!currentSession?.user) {
+                console.log('🔄 No user after verification timeout, creating anonymous session as fallback...');
+                await performAnonymousSignIn();
+              }
+            }, 1000);
+          }
+          return; // Don't update state here - let the timeout handle fallback if needed
         }
         
         setState(prevState => ({
@@ -266,27 +333,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    console.log('🔄 Signing out user...');
     const result = await supabaseClient.auth.signOut();
-    // After sign out, automatically sign in anonymously again
-    try {
-      const { data: anonData, error: anonError } = await supabaseClient.auth.signInAnonymously();
-      if (!anonError && anonData.user) {
-        setState(prevState => ({
-          ...prevState,
-          user: anonData.user,
-          isAuthenticated: true,
-          mode: 'anonymous',
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to re-authenticate anonymously after sign out:', error);
-      setState(prevState => ({
-        ...prevState,
-        user: null,
-        isAuthenticated: false,
-        mode: 'anonymous',
-      }));
-    }
+    
+    // Let onAuthStateChange handle the anonymous sign-in automatically
+    // Don't update state directly here to avoid conflicts
+    
     return result;
   }, []);
 

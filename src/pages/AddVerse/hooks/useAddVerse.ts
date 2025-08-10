@@ -7,9 +7,10 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
-import { dataService, DuplicateVerseError, ValidationError, NetworkError } from '../../../services/dataService';
+import { dataService, DuplicateVerseError, ValidationError, NetworkError, type BatchVerseCreationResult } from '../../../services/dataService';
 import { normalizeReferenceForLookup } from '../../../utils/referenceNormalizer';
 import { detectNetworkStatus, isNetworkConnectivityError, getErrorMessage } from '../../../services/networkDetection';
+import { parseBatchVerseInput } from '../../../utils/batchVerseParser';
 import type { LocalDBSchema } from '../../../services/localDb';
 
 // Form state interface
@@ -26,6 +27,8 @@ export interface AddVerseFormState {
     verse: LocalDBSchema['verses'];
     verseCard: LocalDBSchema['verse_cards'];
   } | null;
+  batchSuccess: BatchVerseCreationResult | null; // For batch operations
+  isBatch: boolean; // Whether current input is detected as batch
   showManualEntry: boolean; // Show manual text entry when offline
 }
 
@@ -38,6 +41,7 @@ interface UseAddVerseReturn extends AddVerseFormState {
   clearState: () => void;
   clearError: () => void;
   clearSuccess: () => void;
+  clearBatchSuccess: () => void; // Clear batch results
   retryWithESV: () => void; // Retry ESV API call
 }
 
@@ -53,6 +57,8 @@ export function useAddVerse(): UseAddVerseReturn {
     isLoading: false,
     error: null,
     success: null,
+    batchSuccess: null,
+    isBatch: false,
     showManualEntry: false
   });
 
@@ -60,14 +66,21 @@ export function useAddVerse(): UseAddVerseReturn {
   const [validationTimer, setValidationTimer] = useState<NodeJS.Timeout | null>(null);
 
   /**
-   * Updates the reference input value
+   * Updates the reference input value and detects if it's a batch
    */
   const setReference = useCallback((reference: string) => {
+    // Detect if this is a batch input (multiple references)
+    const parseResult = parseBatchVerseInput(reference);
+    const isBatch = parseResult.cards.length > 1;
+    
     setState(prev => ({
       ...prev,
       reference,
+      isBatch,
       validationError: null,
-      error: null
+      error: null,
+      success: null, // Clear single success if switching modes
+      batchSuccess: null // Clear batch success if switching modes
     }));
   }, []);
 
@@ -164,7 +177,7 @@ export function useAddVerse(): UseAddVerseReturn {
       return;
     }
 
-    // If showing manual entry, require text
+    // If showing manual entry, require text (only for single verses - batch not supported in manual mode)
     if (state.showManualEntry && (!manualText || !manualText.trim())) {
       setState(prev => ({
         ...prev,
@@ -178,25 +191,35 @@ export function useAddVerse(): UseAddVerseReturn {
       return; // Another call is already in progress
     }
 
+    // Detect if this is a batch operation and get optimized reference
+    const parseResult = parseBatchVerseInput(reference);
+    const isBatch = parseResult.cards.length > 1;
+    
+    // Use the optimized reference (e.g., "Matthew 7:7,8,9" becomes "Matthew 7:7-9")
+    const optimizedReference = parseResult.cards.length > 0 ? parseResult.cards[0].reference : reference;
+
     setState(prev => ({
       ...prev,
       isLoading: true,
       error: null,
-      success: null
+      success: null,
+      batchSuccess: null
     }));
 
     try {
-      // Quick validation without debounce for submit
-      const normalized = normalizeReferenceForLookup(reference);
-      const hasBasicStructure = /[a-z]+\s*\d+/.test(normalized);
-      if (!hasBasicStructure) {
-        setState(prev => ({
-          ...prev,
-          isLoading: false,
-          success: null,
-          error: 'Please enter a Bible reference (e.g., "John 3:16" or "Gal 1")'
-        }));
-        return;
+      // Basic structure validation
+      if (!isBatch) {
+        const normalized = normalizeReferenceForLookup(optimizedReference);
+        const hasBasicStructure = /[a-z]+\s*\d+/.test(normalized);
+        if (!hasBasicStructure) {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            success: null,
+            error: 'Please enter a Bible reference (e.g., "John 3:16" or "Gal 1")'
+          }));
+          return;
+        }
       }
 
       // Get current user ID and access token
@@ -210,7 +233,8 @@ export function useAddVerse(): UseAddVerseReturn {
         isAuthenticated,
         isAnonymous,
         mode,
-        userExists: !!user
+        userExists: !!user,
+        isBatch
       });
 
       // Check authentication state
@@ -230,15 +254,68 @@ export function useAddVerse(): UseAddVerseReturn {
           ...prev,
           isLoading: false,
           error: 'Session issue detected. Please refresh the page or check your internet connection.',
-          showManualEntry: true
+          showManualEntry: !isBatch // Only show manual entry for single verses
         }));
         return;
       }
 
+      // Handle batch operations
+      if (isBatch) {
+        if (state.showManualEntry) {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: 'Manual entry is not supported for multiple verses. Please connect to the internet to add multiple verses at once.'
+          }));
+          return;
+        }
+
+        try {
+          const batchResult = await dataService.addBatchVerses(reference, userId, accessToken || undefined);
+          
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: null,
+            batchSuccess: batchResult,
+            reference: '', // Clear form
+            verseText: '', // Clear manual text
+            showManualEntry: false,
+            isBatch: false
+          }));
+          return;
+        } catch (error) {
+          console.error('Batch Verse Creation Error:', error);
+          
+          // Check if this is a true network connectivity issue
+          const networkStatus = await detectNetworkStatus();
+          const isConnectivityIssue = isNetworkConnectivityError(error, networkStatus);
+          
+          if (isConnectivityIssue || error instanceof NetworkError) {
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              error: 'Connection issue detected. Batch verse creation requires internet connection. Please check your connection and try again.'
+            }));
+            return;
+          } else {
+            // Service issue (ESV API down, server errors, etc.)
+            const errorMessage = getErrorMessage(error, networkStatus);
+            setState(prev => ({
+              ...prev,
+              isLoading: false,
+              error: `Batch creation failed: ${errorMessage}`
+            }));
+            return;
+          }
+        }
+      }
+
+      // Handle single verse operations
       // Try to add verse using ESV API first (if not already in manual mode)
       if (!state.showManualEntry) {
         try {
-          const result = await dataService.addVerse(reference, userId, accessToken || undefined);
+          const result = await dataService.addVerse(optimizedReference, userId, accessToken || undefined);
 
           if (result.success && result.local) {
             // Success - update with actual verse data
@@ -254,7 +331,8 @@ export function useAddVerse(): UseAddVerseReturn {
               },
               reference: '', // Clear form
               verseText: '', // Clear manual text
-              showManualEntry: false // Reset manual entry mode
+              showManualEntry: false,
+              isBatch: false
             }));
 
             // Log sync warning if remote failed
@@ -316,7 +394,7 @@ export function useAddVerse(): UseAddVerseReturn {
 
         // Manual entry mode - save with provided text
         const userId = getCurrentUserId();
-        const result = await dataService.addVerse(reference, userId, undefined, manualText.trim());
+        const result = await dataService.addVerse(optimizedReference, userId, undefined, manualText.trim());
 
         if (result.success && result.local) {
           setState(prev => ({
@@ -331,7 +409,8 @@ export function useAddVerse(): UseAddVerseReturn {
             },
             reference: '', // Clear form
             verseText: '', // Clear manual text
-            showManualEntry: false // Reset manual entry mode
+            showManualEntry: false,
+            isBatch: false
           }));
           return;
         }
@@ -355,7 +434,8 @@ export function useAddVerse(): UseAddVerseReturn {
         ...prev,
         isLoading: false,
         error: errorMessage,
-        success: null // Clear optimistic success on error
+        success: null, // Clear optimistic success on error
+        batchSuccess: null // Clear batch success on error
       }));
     }
   }, [getCurrentUserId, getAccessToken, state.isLoading, state.showManualEntry]);
@@ -408,6 +488,13 @@ export function useAddVerse(): UseAddVerseReturn {
     }));
   }, []);
 
+  const clearBatchSuccess = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      batchSuccess: null
+    }));
+  }, []);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -426,6 +513,7 @@ export function useAddVerse(): UseAddVerseReturn {
     clearState,
     clearError,
     clearSuccess,
+    clearBatchSuccess,
     retryWithESV
   };
 }

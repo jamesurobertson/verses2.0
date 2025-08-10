@@ -29,7 +29,7 @@ export function MobileNavigation() {
       label: 'Add',
       icon: (isActive: boolean) => (
         <svg className={`w-6 h-6 ${isActive ? 'text-yellow-500' : 'text-gray-400'}`} fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z" />
         </svg>
       ),
     },
@@ -46,12 +46,12 @@ export function MobileNavigation() {
   ];
 
   return (
-    <nav 
-      role="navigation" 
+    <nav
+      role="navigation"
       className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200"
       aria-label="Main navigation"
     >
-      <div className="flex justify-center space-x-12 py-2 px-6">
+      <div className="flex justify-center space-x-12 py-2">
         {navItems.map(({ path, label, icon }) => (
           <NavLink
             key={path}

@@ -15,6 +15,9 @@ import { localDb, db } from '../../services/localDb';
 import { decodeReference } from '../../utils/referenceEncoding';
 import { normalizeReferenceForLookup } from '../../utils/referenceNormalizer';
 import { useState, useEffect } from 'react';
+import { useHybridLoading } from '../../hooks/useHybridLoading';
+import { AddToCollectionSkeleton } from '../../components/skeletons/AddToCollectionSkeleton';
+import { VerseDetailsSkeleton } from '../../components/skeletons/VerseDetailsSkeleton';
 import type { LocalDBSchema } from '../../services/localDb';
 
 // Format day names for display
@@ -33,21 +36,48 @@ export function VerseDetails() {
   const navigate = useNavigate();
   const { getCurrentUserId, getAccessToken } = useAuth();
   const [pageState, setPageState] = useState<PageState>({ type: 'loading' });
+  const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isChangingPhase, setIsChangingPhase] = useState(false);
   const [phaseChangeError, setPhaseChangeError] = useState<string | null>(null);
   const [isChangingAssignment, setIsChangingAssignment] = useState(false);
   const [assignmentChangeError, setAssignmentChangeError] = useState<string | null>(null);
+  const [expectUserVerse, setExpectUserVerse] = useState(false);
 
   // Decode reference from URL
   const reference = encodedReference ? decodeReference(encodedReference) : '';
   const normalizedReference = normalizeReferenceForLookup(reference);
 
+  // Use hybrid loading to prevent UI flicker
+  const { showSkeleton, isComplete } = useHybridLoading(isLoading);
+
+  console.log('🔍 VerseDetails render:', { 
+    reference, 
+    normalizedReference, 
+    isLoading, 
+    showSkeleton, 
+    isComplete, 
+    pageStateType: pageState.type 
+  });
+
+  // Quick check if user has this verse locally (for skeleton selection)
+  useEffect(() => {
+    const checkUserVerse = async () => {
+      const userId = getCurrentUserId();
+      if (userId && normalizedReference) {
+        const userVerseCard = await localDb.verseCards.findByUserAndReference(userId, normalizedReference);
+        setExpectUserVerse(!!userVerseCard);
+      }
+    };
+    checkUserVerse();
+  }, [normalizedReference, getCurrentUserId]);
+
   // Load verse data using our lookup strategy
   useEffect(() => {
     if (!reference) {
       setPageState({ type: 'not_found', reference: encodedReference || '', error: 'Invalid reference' });
+      setIsLoading(false);
       return;
     }
 
@@ -55,16 +85,18 @@ export function VerseDetails() {
   }, [reference]);
 
   const loadVerseData = async () => {
+    setIsLoading(true); // Start loading for all operations
     setPageState({ type: 'loading' });
     
     try {
       const userId = getCurrentUserId();
       if (!userId) {
         setPageState({ type: 'not_found', reference, error: 'Authentication required' });
+        setIsLoading(false);
         return;
       }
 
-      // 1. Check if user has this verse locally (by exact reference)
+      // 1. Check if user has this verse locally (by exact reference) - should be instant
       let userVerseCard = await localDb.verseCards.findByUserAndReference(userId, normalizedReference);
       let verse: LocalDBSchema['verses'] | undefined;
       
@@ -72,11 +104,12 @@ export function VerseDetails() {
         verse = await localDb.verses.findById(userVerseCard.verse_id);
         if (verse) {
           setPageState({ type: 'user_verse', verseCard: userVerseCard, verse });
+          setIsLoading(false); // Local lookup complete - won't show skeleton due to speed
           return;
         }
       }
 
-      // 1b. Check if user has this verse via alias
+      // 1b. Check if user has this verse via alias - should be instant
       const aliasMatch = await localDb.aliases.findByAlias(normalizedReference);
       if (aliasMatch) {
         verse = await localDb.verses.findById(aliasMatch.verse_id);
@@ -84,24 +117,29 @@ export function VerseDetails() {
           userVerseCard = await localDb.verseCards.findByUserAndReference(userId, verse.reference);
           if (userVerseCard) {
             setPageState({ type: 'user_verse', verseCard: userVerseCard, verse });
+            setIsLoading(false); // Local lookup complete - won't show skeleton due to speed
             return;
           }
         }
       }
 
-      // 2. Check if verse exists in local verses table (exact reference)
+      // 2. Check if verse exists in local verses table (exact reference) - should be instant
       const localVerse = await localDb.verses.findByReferenceExact(normalizedReference);
       
       if (localVerse) {
         setPageState({ type: 'add_to_collection', verse: localVerse });
+        setIsLoading(false); // Local lookup complete - won't show skeleton due to speed
         return;
       }
 
-      // 2b. Check if verse exists via local alias
+      // 2b. Check if verse exists via local alias - should be instant
       if (aliasMatch && verse) {
         setPageState({ type: 'add_to_collection', verse });
+        setIsLoading(false); // Local lookup complete - won't show skeleton due to speed
         return;
       }
+
+      // Remote operations continue with isLoading already true - skeleton will show
 
       // 3. Check if verse exists in Supabase cloud verses table (exact reference)
       const { data: cloudVerse, error: cloudError } = await supabaseClient
@@ -120,6 +158,7 @@ export function VerseDetails() {
           is_verified: true
         });
         setPageState({ type: 'add_to_collection', verse: localVerseData });
+        setIsLoading(false);
         return;
       }
 
@@ -145,26 +184,41 @@ export function VerseDetails() {
         });
 
         setPageState({ type: 'add_to_collection', verse: localVerseData });
+        setIsLoading(false);
         return;
       }
 
       // 4. Finally, call ESV API as last resort
+      console.log('🔍 Calling ESV API for reference:', normalizedReference);
       try {
         const result = await dataService.lookupVerseReference(normalizedReference);
+        console.log('📖 ESV API result:', result);
         if (result.success && result.verse) {
+          console.log('✅ ESV API found verse, showing add to collection');
           setPageState({ type: 'add_to_collection', verse: result.verse });
+          setIsLoading(false);
+          return;
+        } else {
+          console.log('❌ ESV API returned no verse, result:', result);
+          // Use the specific error message from the API if available
+          const errorMessage = result.error || 'Unable to load this verse right now. Please try again in a moment.';
+          setPageState({ type: 'not_found', reference, error: errorMessage });
+          setIsLoading(false);
           return;
         }
       } catch (esvError) {
-        console.error('ESV API Error:', esvError);
+        console.error('🚨 ESV API Error:', esvError);
+        // Use the error message from the exception if available
+        const errorMessage = esvError instanceof Error ? esvError.message : 'Unable to load this verse right now. Please try again in a moment.';
+        setPageState({ type: 'not_found', reference, error: errorMessage });
+        setIsLoading(false);
+        return;
       }
-
-      // 5. Not found anywhere
-      setPageState({ type: 'not_found', reference, error: 'Verse not found. Please check the spelling or try a different reference.' });
 
     } catch (error) {
       console.error('Error loading verse data:', error);
       setPageState({ type: 'not_found', reference, error: 'An error occurred while loading the verse.' });
+      setIsLoading(false);
     }
   };
 
@@ -385,34 +439,17 @@ export function VerseDetails() {
     }
   };
 
+  // Show skeleton while loading
+  // Use VerseDetailsSkeleton if we expect the user has this verse,
+  // Otherwise use AddToCollectionSkeleton for new verses from API
+  if (showSkeleton) {
+    return expectUserVerse ? <VerseDetailsSkeleton /> : <AddToCollectionSkeleton />;
+  }
+
   // Render based on page state
   if (pageState.type === 'loading') {
-    return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <button
-              onClick={() => navigate('/library')}
-              className="flex items-center text-primary/60 hover:text-primary transition-colors"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <polyline points="15,18 9,12 15,6"></polyline>
-              </svg>
-              Back to Library
-            </button>
-          </div>
-          <div className="animate-pulse">
-            <div className="h-8 bg-primary/10 rounded w-1/3 mb-4"></div>
-            <div className="h-20 bg-primary/10 rounded mb-6"></div>
-            <div className="space-y-4">
-              <div className="h-4 bg-primary/10 rounded w-1/2"></div>
-              <div className="h-4 bg-primary/10 rounded w-1/3"></div>
-              <div className="h-4 bg-primary/10 rounded w-1/4"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    // This should rarely be hit now with hybrid loading
+    return null;
   }
 
   if (pageState.type === 'not_found') {
@@ -499,6 +536,10 @@ export function VerseDetails() {
   }
 
   // User verse details page (pageState.type === 'user_verse')
+  if (pageState.type !== 'user_verse') {
+    return null;
+  }
+  
   const { verseCard, verse } = pageState;
 
   return (

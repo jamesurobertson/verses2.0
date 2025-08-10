@@ -9,6 +9,9 @@ import { Auth } from '../pages/Auth/Auth';
 import { NotFound } from '../pages/NotFound/NotFound';
 import { VerseDetails } from '../pages/VerseDetails/VerseDetails';
 import Spinner from '../components/Spinner/Spinner';
+import Layout from '../pages/Layout';
+import { useLibrary } from '../pages/Library/hooks/useLibrary';
+
 
 /**
  * Mobile-first application router with optional authentication.
@@ -25,30 +28,15 @@ export function AppRouter() {
 
   // Always show main app - authentication is now optional
   return (
-    <div className="h-screen flex flex-col">
-      {/* Main content area */}
-      <main className="flex-1 overflow-y-auto" style={{ paddingBottom: '57px' }}>
-        <Routes>
-          {/* Main app routes - available in all modes */}
-          <Route path="/" element={<Review />} />
-          <Route path="/review" element={<Review />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/add" element={<AddVerse />} />
-          <Route path="/settings" element={<Settings />} />
-          
-          {/* Verse details route */}
-          <Route path="/library/:reference" element={<VerseDetails />} />
-
-          {/* Auth route - accessible if needed */}
-          <Route path="/auth" element={<Auth />} />
-
-          {/* 404 page */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </main>
-
-      {/* Mobile bottom navigation */}
-      <MobileNavigation />
-    </div>
+    <Routes>
+      <Route path="/" element={<Layout title="Review"><Review /></Layout>} />
+      <Route path="/review" element={<Layout title="Review"><Review /></Layout>} />
+      <Route path="/library" element={<Layout title="Library"><Library /></Layout>} />
+      <Route path="/library/:reference" element={<Layout title="Verse Details"><VerseDetails /></Layout>} />
+      <Route path="/add" element={<Layout title="Add Verse"><AddVerse /></Layout>} />
+      <Route path="/settings" element={<Layout title="Settings"><Settings /></Layout>} />
+      <Route path="/auth" element={<Auth />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }

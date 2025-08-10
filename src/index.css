@@ -16,11 +16,36 @@
   /* Soft coral - needs work result */
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh; /* Dynamic viewport height for mobile */
   margin: 0;
+  padding: 0;
+  overflow: hidden; /* Prevent body scroll, let components handle scrolling */
+  position: fixed; /* Prevent iOS Safari bouncing */
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+body {
+  /* Add safe area inset padding for iOS bottom notch/home indicator */
+  padding-bottom: env(safe-area-inset-bottom, 0);
   font-family: 'Roboto', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Remove debug outline for production; keep if needed */
+* {
+  /* outline: 1px solid red; */
 }
 
 /* Smooth animations for Library */
@@ -42,8 +67,11 @@ body {
   }
 }
 
+/* Use 100vh carefully on iOS, fallback to 100% */
 #root {
   min-height: 100vh;
+  min-height: -webkit-fill-available;
+  /* iOS Safari fix */
 }
 
 /* Custom scrollbar styles for verse references */

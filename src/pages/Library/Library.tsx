@@ -7,6 +7,8 @@ import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLibrary, type LibraryVerseCard } from './hooks/useLibrary';
 import { encodeReference } from '../../utils/referenceEncoding';
+import { ErrorCard } from '../../components/shared/ErrorCard';
+import { EmptyState } from '../../components/shared/EmptyState';
 
 // Biblical books organized by testament
 const OLD_TESTAMENT_BOOKS = [
@@ -30,17 +32,17 @@ const getBookFromReference = (reference: string, validationError?: string): stri
   if (validationError) {
     return "⚠️ Invalid Reference";
   }
-  
+
   // Extract book name before the first number
   const match = reference.match(/^([0-9]?\s*[a-zA-Z\s]+)/);
   return match ? match[1].trim() : 'Unknown';
 };
 
 // Function to determine testament
-const getTestament = (bookName: string): 'Old Testament' | 'New Testament' => {
+const getTestament = (bookName: string): 'Old Testament' | 'New Testament' | 'Needs Attention' => {
   if (OLD_TESTAMENT_BOOKS.includes(bookName)) return 'Old Testament';
   if (NEW_TESTAMENT_BOOKS.includes(bookName)) return 'New Testament';
-  return 'New Testament'; // Default
+  return 'Needs Attention'; // Default
 };
 
 // Function to group verses by testament and book, with special handling for invalid verses
@@ -50,7 +52,7 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
     if (verse.verse.validationError) {
       const testament = "Needs Attention";
       const book = "⚠️ Invalid References";
-      
+
       if (!acc[testament]) {
         acc[testament] = {};
       }
@@ -60,7 +62,7 @@ const groupVersesByTestament = (verses: LibraryVerseCard[]) => {
       acc[testament][book].push(verse);
       return acc;
     }
-    
+
     // Group valid verses normally
     const book = getBookFromReference(verse.verse.reference, verse.verse.validationError);
     const testament = getTestament(book);
@@ -107,7 +109,7 @@ export function Library() {
 
   // Auto-switch to "Needs Attention" if there are invalid verses and user is on a different tab
   const hasInvalidVerses = groupedVerses["Needs Attention"] && Object.keys(groupedVerses["Needs Attention"]).length > 0;
-  
+
   // If there are invalid verses and we're not already on Needs Attention, switch to it
   useEffect(() => {
     if (hasInvalidVerses && activeTestament !== 'Needs Attention') {
@@ -139,28 +141,14 @@ export function Library() {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-primary mb-6">Library</h1>
-          <div className="bg-background border border-error/30 rounded-xl p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-error font-medium">Error loading library</h3>
-                <p className="text-error/80 text-sm mt-1">{error}</p>
-              </div>
-              <button
-                onClick={() => {
-                  clearError();
-                  refreshLibrary();
-                }}
-                className="px-4 py-2 bg-error text-white rounded-lg hover:bg-error/90 transition-colors font-medium"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ErrorCard
+        title="Error loading library"
+        message={error}
+        onRetry={() => {
+          clearError();
+          refreshLibrary();
+        }}
+      />
     );
   }
 
@@ -168,88 +156,60 @@ export function Library() {
 
   if (verses.length === 0) {
     return (
-      <div className="bg-background">
-        <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
-
-          <div className="mb-4">
-            <h1 className="text-3xl font-bold text-primary">Library</h1>
-          </div>
-          <div className="bg-background border border-primary/10 rounded-xl p-12 text-center shadow-sm">
-            <h3 className="text-primary font-medium mb-3 text-lg">Your library is empty</h3>
-            <p className="text-primary/70 mb-8 max-w-md mx-auto">
-              Start memorizing by adding your first verse.
-            </p>
-            <a
-              href="/add"
-              className="inline-flex items-center px-6 py-3 bg-accent border border-primary/20 rounded-xl hover:bg-accent/90 font-medium"
-            >
-              Add Verse
-            </a>
-          </div>
-        </div >
-      </div>
+      <EmptyState
+        title="Your library is empty"
+        description="Start memorizing by adding your first verse."
+        actionText="Add Verse"
+        actionHref="/add"
+        icon="📚"
+      />
     );
   }
 
   return (
-    <div className="bg-background">
-      {/* Sticky Header and Tabs */}
-      <div className="sticky top-0 z-10 bg-white">
-        <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-4 flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-primary">Library</h1>
+    <>
+      {/* Testament Tabs - Sticky within content area */}
+      <div className="sticky z-10 bg-white" style={{ top: '0' }}>
+        <div className="flex border-b border-primary/20">
+          {/* Show Needs Attention tab first if there are invalid verses */}
+          {hasInvalidVerses && (
             <button
-              onClick={refreshLibrary}
-              className="px-3 py-1 text-sm bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors"
-              title="Refresh library"
-            >
-              🔄
-            </button>
-          </div>
-
-          {/* Testament Tabs */}
-          <div className="flex border-b border-primary/20">
-            {/* Show Needs Attention tab first if there are invalid verses */}
-            {hasInvalidVerses && (
-              <button
-                onClick={() => setActiveTestament('Needs Attention')}
-                className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 flex items-center gap-2 ${activeTestament === 'Needs Attention'
-                  ? 'text-orange-600 border-orange-500'
-                  : 'text-orange-500 hover:text-orange-600 border-transparent'
-                  }`}
-              >
-                <span>⚠️</span>
-                Needs Attention
-                <span className="bg-orange-500 text-white text-xs rounded-full px-2 py-0.5 ml-1">
-                  {Object.values(groupedVerses["Needs Attention"] || {}).flat().length}
-                </span>
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTestament('Old Testament')}
-              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'Old Testament'
-                ? 'text-primary border-accent'
-                : 'text-primary/60 hover:text-primary/80 border-transparent'
+              onClick={() => setActiveTestament('Needs Attention')}
+              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 flex items-center gap-2 ${activeTestament === 'Needs Attention'
+                ? 'text-orange-600 border-orange-500'
+                : 'text-orange-500 hover:text-orange-600 border-transparent'
                 }`}
             >
-              Old Testament
+              <span>⚠️</span>
+              Needs Attention
+              <span className="bg-orange-500 text-white text-xs rounded-full px-2 py-0.5 ml-1">
+                {Object.values(groupedVerses["Needs Attention"] || {}).flat().length}
+              </span>
             </button>
-            <button
-              onClick={() => setActiveTestament('New Testament')}
-              className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'New Testament'
-                ? 'text-primary border-accent'
-                : 'text-primary/60 hover:text-primary/80 border-transparent'
-                }`}
-            >
-              New Testament
-            </button>
-          </div>
+          )}
+          <button
+            onClick={() => setActiveTestament('Old Testament')}
+            className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'Old Testament'
+              ? 'text-primary border-accent'
+              : 'text-primary/60 hover:text-primary/80 border-transparent'
+              }`}
+          >
+            Old Testament
+          </button>
+          <button
+            onClick={() => setActiveTestament('New Testament')}
+            className={`px-4 py-3 font-medium transition-all duration-300 ease-in-out border-b-2 ${activeTestament === 'New Testament'
+              ? 'text-primary border-accent'
+              : 'text-primary/60 hover:text-primary/80 border-transparent'
+              }`}
+          >
+            New Testament
+          </button>
         </div>
       </div>
 
       {/* Scrollable Content */}
-      <div className="max-w-6xl mx-auto px-4 pt-6 pb-8 sm:px-6 lg:px-8">
+      <div className="pt-6 pb-8">
 
         {/* Books and Verses */}
         <div className="space-y-2 pb-8">
@@ -280,11 +240,10 @@ export function Library() {
                     <button
                       key={verseCard.id}
                       onClick={() => handleVerseClick(verseCard)}
-                      className={`w-full px-4 py-3 text-left transition-all duration-200 ease-in-out flex items-center justify-between rounded-lg ${
-                        verseCard.verse.validationError 
-                          ? 'cursor-default' 
-                          : 'hover:bg-primary/5 cursor-pointer'
-                      }`}
+                      className={`w-full px-4 py-3 text-left transition-all duration-200 ease-in-out flex items-center justify-between rounded-lg ${verseCard.verse.validationError
+                        ? 'cursor-default'
+                        : 'hover:bg-primary/5 cursor-pointer'
+                        }`}
                       style={{
                         animationDelay: expandedBooks.has(book) ? `${index * 50}ms` : '0ms',
                         animation: expandedBooks.has(book) ? 'fadeInUp 0.3s ease-out forwards' : 'none'
@@ -296,8 +255,8 @@ export function Library() {
                             <span className="text-orange-500 text-sm">⚠️</span>
                           )}
                           <h4 className={`font-medium text-base ${verseCard.verse.validationError ? 'text-orange-600' : 'text-primary'}`}>
-                            {verseCard.verse.validationError ? 
-                              `${verseCard.verse.reference} (Invalid)` : 
+                            {verseCard.verse.validationError ?
+                              `${verseCard.verse.reference} (Invalid)` :
                               verseCard.verse.reference
                             }
                           </h4>
@@ -311,7 +270,7 @@ export function Library() {
                               Your manual entry: "{verseCard.verse.text}"
                             </p>
                             <div className="flex gap-2 pt-1">
-                              <button 
+                              <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   // TODO: Implement fix reference logic
@@ -321,7 +280,7 @@ export function Library() {
                               >
                                 Fix Reference
                               </button>
-                              <button 
+                              <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   // TODO: Implement delete verse logic
@@ -354,6 +313,6 @@ export function Library() {
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }

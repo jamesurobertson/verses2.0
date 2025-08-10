@@ -8,6 +8,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { dataService } from "../../services/dataService";
 import { db } from "../../services/localDb";
 import { supabaseClient } from "../../services/supabase";
+import { Card } from '../../components/shared/Card';
 
 export function Settings() {
   const { user, signIn, signOut, convertAnonymousToUser, isAnonymous, getCurrentUserId, getAccessToken } = useAuth();
@@ -22,26 +23,26 @@ export function Settings() {
   const [showLogin, setShowLogin] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  
+
   // Email verification tracking
   const [pendingEmailVerification, setPendingEmailVerification] = useState<string | null>(null);
   const [_verificationSentAt, setVerificationSentAt] = useState<string | null>(null);
   const [showEmailResentIcon, setShowEmailResentIcon] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState('');
-  const hasUnverifiedEmail = (user && !isAnonymous && !user.email_confirmed_at) || 
-                            (isAnonymous && pendingEmailVerification);
-  
+  const hasUnverifiedEmail = (user && !isAnonymous && !user.email_confirmed_at) ||
+    (isAnonymous && pendingEmailVerification);
+
   // Debug logging
-  console.log('Settings Debug:', { 
-    user: user ? { 
-      id: user.id, 
-      email: user.email, 
+  console.log('Settings Debug:', {
+    user: user ? {
+      id: user.id,
+      email: user.email,
       is_anonymous: user.is_anonymous
     } : null,
     isAnonymous
   });
-  
+
   // Profile management state
   const [profileData, setProfileData] = useState({
     email: '',
@@ -58,10 +59,10 @@ export function Settings() {
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-    
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -71,7 +72,7 @@ export function Settings() {
   // Load current profile
   useEffect(() => {
     loadProfile();
-    
+
     const clearPendingVerification = async () => {
       // Clear pending verification if user becomes verified
       if (user && !isAnonymous && user.email_confirmed_at && pendingEmailVerification) {
@@ -87,7 +88,7 @@ export function Settings() {
         }
       }
     };
-    
+
     clearPendingVerification();
   }, [user, isAnonymous, pendingEmailVerification, getCurrentUserId, getAccessToken]);
 
@@ -96,7 +97,7 @@ export function Settings() {
       const userId = getCurrentUserId();
       if (!userId) return;
       const profile = await db.user_profiles.where('user_id').equals(userId).first();
-      
+
       if (profile) {
         setProfileData({
           email: profile.email || '',
@@ -106,7 +107,7 @@ export function Settings() {
           referenceDisplayMode: profile.reference_display_mode || 'full'
         });
         setReferenceDisplayMode(profile.reference_display_mode || 'full');
-        
+
         // Load pending email verification state
         setPendingEmailVerification(profile.pending_email_verification);
         setVerificationSentAt(profile.email_verification_sent_at);
@@ -137,10 +138,10 @@ export function Settings() {
         preferred_translation: profileData.preferredTranslation,
         reference_display_mode: profileData.referenceDisplayMode
       }, accessToken || undefined);
-      
+
       setHasUnsavedChanges(false);
       setProfileSuccess(true);
-      
+
       // Clear success message after 3 seconds
       setTimeout(() => setProfileSuccess(false), 3000);
     } catch (error) {
@@ -161,13 +162,13 @@ export function Settings() {
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!isOnline) {
       setError('Account creation requires an internet connection. Please check your connection and try again.');
       setTimeout(() => setError(''), 5000);
       return;
     }
-    
+
     if (!email || !password) {
       setError('Email and password are required');
       setTimeout(() => setError(''), 5000);
@@ -180,13 +181,13 @@ export function Settings() {
     try {
       // Convert anonymous user to permanent account
       const result = await convertAnonymousToUser(email, password, fullName);
-      
+
       console.log('Convert anonymous result:', result);
-      
+
       if (result.error) {
         throw result.error;
       }
-      
+
       // Store pending verification in local database
       const userId = getCurrentUserId();
       if (userId) {
@@ -198,12 +199,12 @@ export function Settings() {
         setPendingEmailVerification(email);
         setVerificationSentAt(new Date().toISOString());
       }
-      
+
       setShowAccountCreation(false);
       setEmail('');
       setPassword('');
       setFullName('');
-      
+
     } catch (err) {
       console.error('Account creation failed:', err);
       setError(`Failed to create account: ${(err as any)?.message || 'Please try again.'}`);
@@ -216,7 +217,7 @@ export function Settings() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!loginEmail || !loginPassword) {
       setError('Email and password are required');
       setTimeout(() => setError(''), 5000);
@@ -231,7 +232,7 @@ export function Settings() {
       if (result.error) {
         throw result.error;
       }
-      
+
       setShowLogin(false);
       setLoginEmail('');
       setLoginPassword('');
@@ -249,18 +250,18 @@ export function Settings() {
 
   const handleResendVerification = async () => {
     if (!pendingEmailVerification) return;
-    
+
     setIsLoading(true);
     setError('');
-    
+
     try {
       const { error } = await supabaseClient.auth.resend({
         type: 'signup',
         email: pendingEmailVerification
       });
-      
+
       if (error) throw error;
-      
+
       // Update sent timestamp
       const userId = getCurrentUserId();
       if (userId) {
@@ -270,7 +271,7 @@ export function Settings() {
         }, accessToken || undefined);
         setVerificationSentAt(new Date().toISOString());
       }
-      
+
       // Show checkmark icon briefly instead of status message
       setShowEmailResentIcon(true);
       setTimeout(() => setShowEmailResentIcon(false), 3000);
@@ -285,24 +286,24 @@ export function Settings() {
 
   const handleChangeEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!newEmail) {
       setError('Email is required');
       setTimeout(() => setError(''), 5000);
       return;
     }
-    
+
     setIsLoading(true);
     setError('');
-    
+
     try {
       // Update user email in Supabase
-      const { error } = await supabaseClient.auth.updateUser({ 
-        email: newEmail 
+      const { error } = await supabaseClient.auth.updateUser({
+        email: newEmail
       });
-      
+
       if (error) throw error;
-      
+
       // Update local state
       const userId = getCurrentUserId();
       if (userId) {
@@ -314,7 +315,7 @@ export function Settings() {
         setPendingEmailVerification(newEmail);
         setVerificationSentAt(new Date().toISOString());
       }
-      
+
       setIsEditingEmail(false);
       setNewEmail('');
       setShowEmailResentIcon(true);
@@ -330,24 +331,9 @@ export function Settings() {
 
 
   return (
-    <div className="bg-background">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white">
-        <div className="max-w-6xl mx-auto px-4 pt-6 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-4">
-            <h1 className="text-3xl font-bold text-primary">Settings</h1>
-          </div>
-        </div>
-      </div>
-
-
-      {/* Content */}
-      <div className="px-6 py-6 space-y-6">
-
-        {/* Account Section */}
-        <div className="bg-background border border-primary/10 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-primary mb-4">Account</h2>
+    <div className="space-y-6">
+      {/* Account Section */}
+      <Card title="Account">
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -358,16 +344,14 @@ export function Settings() {
           {/* Anonymous users - show create account and login options (but not if email verification is pending) */}
           {isAnonymous && !hasUnverifiedEmail && (
             <div className="space-y-4">
-              <div className={`p-4 border rounded-lg ${
-                !isOnline 
-                  ? 'bg-orange-50 border-orange-200' 
+              <div className={`p-4 border rounded-lg ${!isOnline
+                  ? 'bg-orange-50 border-orange-200'
                   : 'bg-yellow-50 border-yellow-200'
-              }`}>
+                }`}>
                 <div className="flex items-start space-x-3">
                   <div className="flex-shrink-0">
-                    <svg className={`w-5 h-5 mt-0.5 ${
-                      !isOnline ? 'text-orange-500' : 'text-yellow-500'
-                    }`} fill="currentColor" viewBox="0 0 20 20">
+                    <svg className={`w-5 h-5 mt-0.5 ${!isOnline ? 'text-orange-500' : 'text-yellow-500'
+                      }`} fill="currentColor" viewBox="0 0 20 20">
                       {!isOnline ? (
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                       ) : (
@@ -376,15 +360,13 @@ export function Settings() {
                     </svg>
                   </div>
                   <div className="flex-1">
-                    <h3 className={`text-sm font-medium ${
-                      !isOnline ? 'text-orange-800' : 'text-yellow-800'
-                    }`}>
+                    <h3 className={`text-sm font-medium ${!isOnline ? 'text-orange-800' : 'text-yellow-800'
+                      }`}>
                       {!isOnline ? 'You\'re Offline' : 'Secure Your Data'}
                     </h3>
-                    <p className={`text-sm mt-1 ${
-                      !isOnline ? 'text-orange-700' : 'text-yellow-700'
-                    }`}>
-                      {!isOnline 
+                    <p className={`text-sm mt-1 ${!isOnline ? 'text-orange-700' : 'text-yellow-700'
+                      }`}>
+                      {!isOnline
                         ? 'Your data is saved on your device only. Account creation requires an internet connection to sync your data to the cloud.'
                         : 'Your data is saved on your device only. Create an account or log in to sync your data to the cloud and access it from other devices.'
                       }
@@ -401,11 +383,10 @@ export function Settings() {
                     setError('');
                   }}
                   disabled={!isOnline}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-                    isOnline 
-                      ? 'bg-green-600 text-white hover:bg-green-700' 
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${isOnline
+                      ? 'bg-green-600 text-white hover:bg-green-700'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   {isOnline ? 'Create Account' : 'Create Account (Offline)'}
                 </button>
@@ -416,11 +397,10 @@ export function Settings() {
                     setError('');
                   }}
                   disabled={!isOnline}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${
-                    isOnline 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors ${isOnline
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   {isOnline ? 'Log In' : 'Log In (Offline)'}
                 </button>
@@ -511,7 +491,7 @@ export function Settings() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="flex-shrink-0">
                   <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -575,7 +555,7 @@ export function Settings() {
                     required
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Password
@@ -598,7 +578,7 @@ export function Settings() {
                   >
                     {isLoading ? 'Logging in...' : !isOnline ? 'Offline' : 'Log In'}
                   </button>
-                  
+
                   <button
                     type="button"
                     onClick={() => {
@@ -633,7 +613,7 @@ export function Settings() {
                     placeholder="Your name"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Email
@@ -647,7 +627,7 @@ export function Settings() {
                     required
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Password
@@ -670,7 +650,7 @@ export function Settings() {
                   >
                     {isLoading ? 'Creating...' : !isOnline ? 'Offline' : 'Create Account'}
                   </button>
-                  
+
                   <button
                     type="button"
                     onClick={() => {
@@ -688,13 +668,13 @@ export function Settings() {
               </form>
             </div>
           )}
-        </div>
+      </Card>
 
-        {/* Profile Management - Only show for authenticated users */}
-        {!isAnonymous && (
-          <div className="bg-background border border-primary/10 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-primary">Profile</h2>
+      {/* Profile Management - Only show for authenticated users */}
+      {!isAnonymous && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-primary">Profile</h2>
               {hasUnsavedChanges && (
                 <button
                   onClick={saveProfile}
@@ -797,12 +777,11 @@ export function Settings() {
                 </select>
               </div>
             </div>
-          </div>
-        )}
+        </Card>
+      )}
 
-        {/* Display Preferences - For anonymous users or fallback */}
-        <div className="bg-background border border-primary/10 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-primary mb-4">Display</h2>
+      {/* Display Preferences - For anonymous users or fallback */}
+      <Card title="Display">
 
           <div className="space-y-4">
             {/* Reference Display Mode */}
@@ -826,8 +805,7 @@ export function Settings() {
               </select>
             </div>
           </div>
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }

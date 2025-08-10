@@ -151,7 +151,8 @@ async function verifyVerseWithESV(reference: string, text: string, translation: 
     }
 
     const canonicalRef = esvResponse.canonical;
-    const canonicalText = esvResponse.passages[0].trim();
+    // Combine all passages for multiple references (semicolon-separated)
+    const canonicalText = esvResponse.passages.map(passage => passage.trim()).join('\n\n');
 
     // ESV verses are immutable - must match exactly
     return canonicalRef === reference && canonicalText === text;
@@ -257,7 +258,8 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
     }
 
     const canonicalRef = esvResponse.canonical;
-    const verseText = esvResponse.passages[0].trim();
+    // Combine all passages for multiple references (semicolon-separated)
+    const verseText = esvResponse.passages.map(passage => passage.trim()).join('\n\n');
 
     // CRITICAL: Double-check that we get back exactly what we expect
     // This prevents any tampering or API inconsistencies

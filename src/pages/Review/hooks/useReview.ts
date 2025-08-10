@@ -221,40 +221,43 @@ export function useReview(): UseReviewReturn {
     const currentCard = session.cards[session.currentIndex];
     if (!currentCard) return;
 
+    const userId = getCurrentUserId();
+    const accessToken = await getAccessToken();
+
+    // Update session state FIRST - so UI progresses even if remote sync fails
+    const newSession = {
+      ...session,
+      correctCount: session.correctCount + 1,
+      currentIndex: session.currentIndex + 1
+    };
+
+    console.log('markCardCorrect - Session Update:', {
+      oldIndex: session.currentIndex,
+      newIndex: newSession.currentIndex,
+      totalCards: newSession.cards.length,
+      nextCard: newSession.cards[newSession.currentIndex]?.verse?.reference || 'none'
+    });
+
+    setSession(newSession);
+
+    // Don't automatically end session - let UI show completion screen
+    // Session will be ended when user chooses to leave completion screen
+
+    // Record review locally only during session - sync to remote later
     try {
-      const userId = getCurrentUserId();
-      const accessToken = await getAccessToken();
-
-      // Record the review result
-      await dataService.recordReview(
-        currentCard.id,
-        userId,
-        true, // was successful
-        undefined, // review time - could be calculated
-        accessToken || undefined
-      );
-
-      // Update session state
-      const newSession = {
-        ...session,
-        correctCount: session.correctCount + 1,
-        currentIndex: session.currentIndex + 1
-      };
-
-      setSession(newSession);
-
-      // End session if no more cards
-      if (newSession.currentIndex >= newSession.cards.length) {
-        endReview();
-      }
-
-      // Refresh due cards to reflect changes
-      await refreshDueCards();
+      await localDb.reviewLogs.create({
+        user_id: userId,
+        verse_card_id: currentCard.id,
+        was_successful: true,
+        counted_toward_progress: true, // Will be recalculated by server trigger
+        review_time_seconds: undefined
+      });
+      console.log('Review recorded locally (instant)');
     } catch (error) {
-      console.error('Failed to mark card correct:', error);
-      setError('Failed to record review result');
+      console.error('Failed to record local review:', error);
+      // Continue anyway - don't block UI
     }
-  }, [session, getCurrentUserId, getAccessToken, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken]);
 
   /**
    * Marks the current card as incorrect and advances session
@@ -265,11 +268,24 @@ export function useReview(): UseReviewReturn {
     const currentCard = session.cards[session.currentIndex];
     if (!currentCard) return;
 
-    try {
-      const userId = getCurrentUserId();
-      const accessToken = await getAccessToken();
+    const userId = getCurrentUserId();
+    const accessToken = await getAccessToken();
 
-      // Record the review result
+    // Update session state FIRST - so UI progresses even if remote sync fails
+    const newSession = {
+      ...session,
+      incorrectCount: session.incorrectCount + 1,
+      incorrectCards: [...session.incorrectCards, currentCard], // Track incorrect card
+      currentIndex: session.currentIndex + 1
+    };
+
+    setSession(newSession);
+
+    // Don't automatically end session - let UI show completion screen
+    // Session will be ended when user chooses to leave completion screen
+
+    // Record the review result (allow this to fail gracefully)
+    try {
       await dataService.recordReview(
         currentCard.id,
         userId,
@@ -278,28 +294,13 @@ export function useReview(): UseReviewReturn {
         accessToken || undefined
       );
 
-      // Update session state
-      const newSession = {
-        ...session,
-        incorrectCount: session.incorrectCount + 1,
-        incorrectCards: [...session.incorrectCards, currentCard], // Track incorrect card
-        currentIndex: session.currentIndex + 1
-      };
-
-      setSession(newSession);
-
-      // End session if no more cards
-      if (newSession.currentIndex >= newSession.cards.length) {
-        endReview();
-      }
-
-      // Refresh due cards to reflect changes
-      await refreshDueCards();
+      // DON'T refresh due cards during active session - this interferes with session progression  
+      // Due cards will be refreshed when session ends or when returning to review page
     } catch (error) {
-      console.error('Failed to mark card incorrect:', error);
-      setError('Failed to record review result');
+      console.error('Failed to record review (but UI progressed):', error);
+      // Don't set error state - local progression succeeded
     }
-  }, [session, getCurrentUserId, getAccessToken, refreshDueCards]);
+  }, [session, getCurrentUserId, getAccessToken]);
 
   /**
    * Ends the current review session
@@ -316,6 +317,9 @@ export function useReview(): UseReviewReturn {
     }
 
     setSession(null);
+    
+    // Don't automatically refresh due cards - let user decide what to do next
+    // Due cards will be refreshed when they navigate back to review page or manually refresh
   }, [session]);
 
   const loadReferenceDisplayMode = useCallback(async (userId: string) => {
@@ -335,6 +339,16 @@ export function useReview(): UseReviewReturn {
   // Calculate derived values
   const sessionActive = session !== null;
   const currentCard = session ? session.cards[session.currentIndex] || null : null;
+  
+  // Debug logging
+  if (session) {
+    console.log('Session Debug:', {
+      currentIndex: session.currentIndex,
+      totalCards: session.cards.length,
+      currentCard: currentCard ? `${currentCard.verse.reference}` : 'null',
+      allCardReferences: session.cards.map(card => card.verse.reference)
+    });
+  }
   const sessionProgress = session ? {
     current: session.currentIndex + 1,
     total: session.cards.length,

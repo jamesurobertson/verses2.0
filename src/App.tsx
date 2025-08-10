@@ -39,7 +39,7 @@ function AppContent() {
 
   return (
     <>
-      <PWAInstallPrompt />
+      {/* <PWAInstallPrompt /> */}
       <AppRouter />
     </>
   );

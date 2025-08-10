@@ -2,6 +2,7 @@ import { db, type LocalDBSchema } from './localDb';
 import { supabaseClient, db as supabaseDb } from './supabase';
 import { normalizeReferenceForLookup } from '../utils/referenceNormalizer';
 import { getTodayString, getUserTodayStringInTimezone } from '../utils/dateUtils';
+import { parseBatchVerseInput, preValidateBatch, type VerseCardRequest, type BatchParseResult } from '../utils/batchVerseParser';
 import { v4 as uuidv4 } from 'uuid';
 // import { BatchSyncService, shouldUseBatchSync } from './batchSyncService'; // Currently unused
 
@@ -78,6 +79,39 @@ export interface BatchDualWriteResult {
     validationErrors: number;
   };
   processingTimeMs: number;
+}
+
+// Batch verse creation results
+export interface BatchVerseCreationResult {
+  successful: Array<{
+    id: string;
+    reference: string;
+    normalizedReference: string;
+    result: DualWriteResult<{
+      verse: LocalDBSchema['verses'];
+      verseCard: LocalDBSchema['verse_cards'];
+    }>;
+  }>;
+  failed: Array<{
+    id: string;
+    reference: string;
+    normalizedReference: string;
+    error: string;
+    isDuplicate?: boolean;
+  }>;
+  likelyInvalid: Array<{
+    id: string;
+    reference: string;
+    normalizedReference: string;
+    reason: string;
+  }>;
+  summary: {
+    total: number;
+    successful: number;
+    failed: number;
+    duplicates: number;
+    likelyInvalid: number;
+  };
 }
 
 // Global batch sync state (exported for batch service)
@@ -265,7 +299,8 @@ export const dataService: any = {
     reference: string,
     userId: string,
     accessToken?: string,
-    manualText?: string
+    manualText?: string,
+    precomputedNormalizedRef?: string // For batch operations - use pre-computed normalized reference
   ): Promise<
     DualWriteResult<{
       verse: LocalDBSchema['verses'];
@@ -282,7 +317,7 @@ export const dataService: any = {
       success: false
     };
 
-    const normalizedInput = normalizeReferenceForLookup(reference);
+    const normalizedInput = precomputedNormalizedRef || normalizeReferenceForLookup(reference);
     
     // Get user's timezone for consistent date calculations
     const userProfile = await db.user_profiles.where('user_id').equals(userId).first();
@@ -291,6 +326,7 @@ export const dataService: any = {
 
     console.log('🔄 addVerse called with timezone information:', {
       reference,
+      precomputedNormalizedRef,
       normalizedInput,
       userId: userId ? `${userId.slice(0, 8)}...` : 'None',
       userTimezone,
@@ -852,14 +888,35 @@ export const dataService: any = {
       
       await db.transaction('rw', db.review_logs, async (tx) => {
         // Create review log within transaction - allow multiple reviews per day
-        // The database trigger (process_review_comprehensive) handles count_toward_progress logic
         const now = new Date().toISOString();
+        const today = now.split('T')[0]; // Get date part (YYYY-MM-DD)
+        
+        // Check if this is the first review today for this verse card
+        // Replicate the PostgreSQL trigger logic for local IndexedDB
+        const existingTodayReviews = await tx.review_logs
+          .where('[verse_card_id+created_at]')
+          .between([verseCardId, today], [verseCardId, today + 'Z'], true, true)
+          .toArray();
+        
+        const isFirstReviewToday = existingTodayReviews.length === 0;
+        
+        // Only successful first reviews of the day count toward progress
+        const countsTowardProgress = wasSuccessful && isFirstReviewToday;
+        
+        console.log('Review progress logic:', {
+          verseCardId: verseCardId.slice(0, 8) + '...',
+          wasSuccessful,
+          isFirstReviewToday,
+          existingTodayReviewsCount: existingTodayReviews.length,
+          countsTowardProgress
+        });
+        
         const logData: LocalDBSchema['review_logs'] = {
           id: uuidv4(),
           user_id: userId,
           verse_card_id: verseCardId,
           was_successful: wasSuccessful,
-          counted_toward_progress: false, // Will be updated by trigger if applicable
+          counted_toward_progress: countsTowardProgress,
           review_time_seconds: reviewTimeSeconds || null,
           created_at: now
         };
@@ -913,21 +970,28 @@ export const dataService: any = {
                 const remoteCard = remoteCards && remoteCards.length > 0 ? remoteCards[0] : null;
 
                 if (remoteCard) {
-                  // Create review log remotely
-                  const { error: reviewError } = await supabaseClient
-                    .from('review_logs')
-                    .insert({
-                      user_id: userId,
-                      verse_card_id: remoteCard.id,
-                      was_successful: wasSuccessful,
-                      counted_toward_progress: false, // Remote trigger will handle this
-                      review_time_seconds: reviewTimeSeconds || null
-                    });
+                  // Create review log remotely using the helper function
+                  try {
+                    const { error: reviewError } = await supabaseClient
+                      .from('review_logs')
+                      .insert({
+                        user_id: userId,
+                        verse_card_id: remoteCard.id,
+                        was_successful: wasSuccessful,
+                        counted_toward_progress: false, // Remote trigger will handle this
+                        review_time_seconds: reviewTimeSeconds || null
+                      });
 
-                  if (reviewError) {
-                    throw reviewError;
+                    if (reviewError) {
+                      console.error('Review sync error details:', reviewError);
+                      throw reviewError;
+                    }
+                    console.log('Review synced to remote successfully');
+                  } catch (reviewLogError) {
+                    console.error('Failed to sync review log to remote:', reviewLogError);
+                    // This is non-critical for user experience - local review was recorded
+                    throw reviewLogError;
                   }
-                  console.log('Review synced to remote successfully');
                 }
               }
             }
@@ -1778,7 +1842,7 @@ export const dataService: any = {
    * Lookup a verse reference using ESV API (for VerseDetails page)
    * Returns verse data without adding to user's collection
    */
-  async lookupVerseReference(reference: string): Promise<{ success: boolean; verse?: LocalDBSchema['verses'] }> {
+  async lookupVerseReference(reference: string): Promise<{ success: boolean; verse?: LocalDBSchema['verses']; error?: string }> {
     try {
       const supabaseUrl = process.env.NODE_ENV === 'test' 
         ? process.env.VITE_SUPABASE_URL 
@@ -1790,6 +1854,8 @@ export const dataService: any = {
         throw new Error('User not authenticated');
       }
 
+      console.log('🔍 Calling verse-operations edge function for lookup:', reference);
+
       // Call verse-operations edge function for ESV lookup only
       const response = await fetch(`${supabaseUrl}/functions/v1/verse-operations`, {
         method: 'POST',
@@ -1798,18 +1864,37 @@ export const dataService: any = {
           'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          operation: 'lookup', // Use existing operation type
+          operation: 'create', // Use create to force ESV API call and get proper error messages
           reference,
           normalizedRef: reference,
           translation: 'ESV'
         })
       });
 
+      console.log('📡 Edge function response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
       if (!response.ok) {
-        throw new Error(`ESV lookup failed: ${response.status} ${response.statusText}`);
+        // Try to extract the actual error message from the edge function
+        let errorMessage = `Server error ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+        }
+        
+        console.error('❌ Edge function returned error:', errorMessage);
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
+      console.log('✅ Edge function result:', result);
 
       if (result.verse) {
         // Cache the verse locally for future use
@@ -1830,10 +1915,11 @@ export const dataService: any = {
         return { success: true, verse: localVerse };
       }
 
-      return { success: false };
+      return { success: false, error: 'Verse not found' };
     } catch (error) {
-      console.error('ESV lookup error:', error);
-      return { success: false };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      console.error('ESV lookup error:', errorMessage);
+      return { success: false, error: errorMessage };
     }
   },
 
@@ -2357,6 +2443,207 @@ export const dataService: any = {
       console.error('❌ Failed to complete email verification:', error);
       throw error;
     }
+  },
+
+  /**
+   * Batch verse creation using the parser
+   * Parses user input into individual verse card requests and processes them
+   */
+  async addBatchVerses(
+    input: string,
+    userId: string,
+    accessToken?: string
+  ): Promise<BatchVerseCreationResult> {
+    console.log('🔄 Starting batch verse creation:', {
+      input,
+      userId: userId ? `${userId.slice(0, 8)}...` : 'None',
+      hasAccessToken: !!accessToken
+    });
+
+    // Step 1: Parse the input into individual verse card requests
+    const parseResult: BatchParseResult = parseBatchVerseInput(input);
+    console.log('📊 Parse result:', {
+      totalCards: parseResult.cards.length,
+      references: parseResult.cards.map(c => c.reference)
+    });
+
+    if (parseResult.cards.length === 0) {
+      return {
+        successful: [],
+        failed: [],
+        likelyInvalid: [],
+        summary: {
+          total: 0,
+          successful: 0,
+          failed: 0,
+          duplicates: 0,
+          likelyInvalid: 0
+        }
+      };
+    }
+
+    // Step 2: Pre-validate references to separate likely valid from invalid
+    const validation = preValidateBatch(parseResult.cards);
+    console.log('🔍 Pre-validation result:', {
+      likelyValid: validation.likelyValid.length,
+      likelyInvalid: validation.likelyInvalid.length,
+      invalidReferences: validation.likelyInvalid.map(c => c.reference)
+    });
+
+    const result: BatchVerseCreationResult = {
+      successful: [],
+      failed: [],
+      likelyInvalid: validation.likelyInvalid.map(card => ({
+        id: card.id,
+        reference: card.reference,
+        normalizedReference: card.normalizedReference,
+        reason: 'Invalid reference format or contains unsupported characters'
+      })),
+      summary: {
+        total: parseResult.cards.length,
+        successful: 0,
+        failed: 0,
+        duplicates: 0,
+        likelyInvalid: validation.likelyInvalid.length
+      }
+    };
+
+    // Step 3: Process each likely valid reference individually
+    for (const card of validation.likelyValid) {
+      console.log(`🔄 Processing card ${card.id}: "${card.reference}"`);
+
+      try {
+        // Use existing addVerse function for each individual verse
+        // Pass pre-computed normalized reference for proper alias creation
+        const verseResult = await this.addVerse(
+          card.reference,
+          userId,
+          accessToken,
+          undefined, // manualText
+          card.normalizedReference // precomputedNormalizedRef - normalized optimized reference
+        );
+
+        if (verseResult.success) {
+          result.successful.push({
+            id: card.id,
+            reference: card.reference,
+            normalizedReference: card.normalizedReference,
+            result: verseResult
+          });
+          result.summary.successful++;
+          console.log(`✅ Successfully processed card ${card.id}`);
+        } else {
+          // Handle case where addVerse doesn't throw but isn't successful
+          result.failed.push({
+            id: card.id,
+            reference: card.reference,
+            normalizedReference: card.normalizedReference,
+            error: 'Verse creation failed without specific error',
+            isDuplicate: false
+          });
+          result.summary.failed++;
+          console.log(`❌ Failed to process card ${card.id}: no success`);
+        }
+
+      } catch (error) {
+        console.error(`❌ Error processing card ${card.id}:`, error);
+
+        // Handle duplicate verses specially
+        if (error instanceof DuplicateVerseError) {
+          result.failed.push({
+            id: card.id,
+            reference: card.reference,
+            normalizedReference: card.normalizedReference,
+            error: error.message,
+            isDuplicate: true
+          });
+          result.summary.duplicates++;
+        } else {
+          result.failed.push({
+            id: card.id,
+            reference: card.reference,
+            normalizedReference: card.normalizedReference,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            isDuplicate: false
+          });
+          result.summary.failed++;
+        }
+      }
+    }
+
+    console.log('📊 Batch verse creation completed:', {
+      total: result.summary.total,
+      successful: result.summary.successful,
+      failed: result.summary.failed,
+      duplicates: result.summary.duplicates,
+      likelyInvalid: result.summary.likelyInvalid
+    });
+
+    return result;
+  },
+
+  /**
+   * Batch verse lookup for navigation to /library/:verseref URLs
+   * Handles complex references that might contain multiple verses
+   */
+  async lookupBatchVerseReference(
+    reference: string
+  ): Promise<{
+    success: boolean;
+    verses: LocalDBSchema['verses'][];
+    errors: string[];
+    isBatch: boolean;
+  }> {
+    console.log('🔍 Starting batch verse lookup:', { reference });
+
+    // Step 1: Parse the reference to see if it's a batch
+    const parseResult: BatchParseResult = parseBatchVerseInput(reference);
+    const isBatch = parseResult.cards.length > 1;
+
+    console.log('📊 Lookup parse result:', {
+      isBatch,
+      totalCards: parseResult.cards.length,
+      references: parseResult.cards.map(c => c.reference)
+    });
+
+    const verses: LocalDBSchema['verses'][] = [];
+    const errors: string[] = [];
+
+    // Step 2: Look up each individual reference
+    for (const card of parseResult.cards) {
+      try {
+        const lookupResult = await this.lookupVerseReference(card.reference);
+        
+        if (lookupResult.success && lookupResult.verse) {
+          verses.push(lookupResult.verse);
+          console.log(`✅ Found verse for ${card.reference}`);
+        } else {
+          const errorMsg = lookupResult.error || `Verse not found: ${card.reference}`;
+          errors.push(errorMsg);
+          console.log(`❌ Failed to find verse for ${card.reference}: ${errorMsg}`);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : `Unknown error for ${card.reference}`;
+        errors.push(errorMsg);
+        console.error(`❌ Error looking up ${card.reference}:`, error);
+      }
+    }
+
+    const success = verses.length > 0; // Success if we found at least one verse
+    
+    console.log('📊 Batch verse lookup completed:', {
+      success,
+      foundVerses: verses.length,
+      errors: errors.length,
+      isBatch
+    });
+
+    return {
+      success,
+      verses,
+      errors,
+      isBatch
+    };
   }
 };
 

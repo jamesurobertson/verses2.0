@@ -129,6 +129,16 @@ db.version(14).stores({
   });
 })
 
+// Version 15: Add compound index for count_toward_progress logic
+db.version(15).stores({
+  user_profiles: 'id, user_id, timezone, pending_email_verification, email_verification_sent_at, [user_id]',
+  verse_cards: 'id, user_id, verse_id, next_due_date, current_phase, archived, assigned_day_of_week, assigned_week_parity, assigned_day_of_month, [user_id+verse_id]',
+  verses: 'id, reference, translation, is_verified, [reference+translation]',
+  aliases: 'id, alias, verse_id, [alias], [verse_id]',
+  review_logs: 'id, user_id, verse_card_id, was_successful, created_at, [verse_card_id+user_id], [user_id+verse_card_id], [verse_card_id+created_at]',
+  syncQueue: 'id, userId, type, status, queuedAt, [userId+type], [status]'
+})
+
 // Database hooks for auto-timestamps, UUIDs, and validation
 db.verses.hook('creating', function (_primKey, obj, _trans) {
   const now = new Date().toISOString();
