@@ -1,6 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
 import { useAuth } from "../contexts/AuthContext";
-import { MobileNavigation } from '../components/MobileNavigation/MobileNavigation';
 import { Review } from '../pages/Review/Review';
 import { Library } from '../pages/Library/Library';
 import { AddVerse } from '../pages/AddVerse/AddVerse';
@@ -10,7 +9,6 @@ import { NotFound } from '../pages/NotFound/NotFound';
 import { VerseDetails } from '../pages/VerseDetails/VerseDetails';
 import Spinner from '../components/Spinner/Spinner';
 import Layout from '../pages/Layout';
-import { useLibrary } from '../pages/Library/hooks/useLibrary';
 
 
 /**
@@ -30,7 +28,7 @@ export function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Layout title="Review"><Review /></Layout>} />
-      <Route path="/review" element={<Layout title="Review"><Review /></Layout>} />
+      <Route path="/review" element={<Review />} />
       <Route path="/library" element={<Layout title="Library"><Library /></Layout>} />
       <Route path="/library/:reference" element={<Layout title="Verse Details"><VerseDetails /></Layout>} />
       <Route path="/add" element={<Layout title="Add Verse"><AddVerse /></Layout>} />
