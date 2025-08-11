@@ -241,16 +241,63 @@ export function SlackCard({
               }}
             >
               <animated.div
-                className="absolute top-4 left-4 flex flex-col items-center gap-2 text-white font-bold text-xl drop-shadow-lg"
+                className="absolute top-2 left-2 flex flex-col items-center gap-3 text-white font-bold text-2xl"
                 style={{
-                  opacity: x.to(val => val > 30 ? Math.min((val - 30) / 120, 1) : 0),
-                  transform: x.to(val => `translateX(${Math.min(val * 0.1, 20)}px)`)
+                  opacity: x.to(val => val >= 150 ? 1 : (val > 10 ? Math.min((val - 10) / 80, 0.9) : 0)),
+                  transform: x.to(val => `translateX(${Math.min(val * 0.1, 20)}px)`),
+                  zIndex: 2000
                 }}
               >
-                <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                </svg>
-                <span className="text-lg">CORRECT</span>
+                <div className="relative w-16 h-16">
+                  {/* Circle with proper border alignment */}
+                  <svg className="w-16 h-16 transform -rotate-90 absolute inset-0" viewBox="0 0 64 64">
+                    {/* Base circle border */}
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="30"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.3)"
+                      strokeWidth="3"
+                    />
+                    {/* Progress circle that fills */}
+                    <animated.circle
+                      cx="32"
+                      cy="32"
+                      r="30"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth="3"
+                      strokeDasharray="188.5" // 2 * π * 30
+                      strokeDashoffset={x.to(val => {
+                        const progress = Math.min(Math.max(val, 0) / 150, 1);
+                        return 188.5 * (1 - progress);
+                      })}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {/* White filled circle at threshold with extra padding to cover separator */}
+                  <animated.div
+                    className="absolute inset-0 rounded-full flex items-center justify-center"
+                    style={{
+                      backgroundColor: x.to(val => val >= 150 ? 'white' : 'transparent'),
+                      margin: '-4px', // Extend beyond circle to cover any lines
+                      width: '72px',
+                      height: '72px'
+                    }}
+                  >
+                    <animated.svg
+                      className="w-9 h-9"
+                      viewBox="0 0 24 24"
+                      style={{
+                        fill: x.to(val => val >= 150 ? '#22c55e' : 'white')
+                      }}
+                    >
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </animated.svg>
+                  </animated.div>
+                </div>
+                <span className="text-xl font-extrabold">CORRECT</span>
               </animated.div>
             </animated.div>
 
@@ -269,16 +316,63 @@ export function SlackCard({
               }}
             >
               <animated.div
-                className="absolute top-4 right-4 flex flex-col items-center gap-2 text-white font-bold text-xl drop-shadow-lg"
+                className="absolute top-2 right-2 flex flex-col items-center gap-3 text-white font-bold text-2xl"
                 style={{
-                  opacity: x.to(val => val < -30 ? Math.min((Math.abs(val) - 30) / 120, 1) : 0),
-                  transform: x.to(val => `translateX(${Math.max(val * 0.1, -20)}px)`)
+                  opacity: x.to(val => val <= -150 ? 1 : (val < -10 ? Math.min((Math.abs(val) - 10) / 80, 0.9) : 0)),
+                  transform: x.to(val => `translateX(${Math.max(val * 0.1, -20)}px)`),
+                  zIndex: 2000
                 }}
               >
-                <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                </svg>
-                <span className="text-lg">INCORRECT</span>
+                <div className="relative w-16 h-16">
+                  {/* Circle with proper border alignment */}
+                  <svg className="w-16 h-16 transform -rotate-90 absolute inset-0" viewBox="0 0 64 64">
+                    {/* Base circle border */}
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="30"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.3)"
+                      strokeWidth="3"
+                    />
+                    {/* Progress circle that fills */}
+                    <animated.circle
+                      cx="32"
+                      cy="32"
+                      r="30"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth="3"
+                      strokeDasharray="188.5" // 2 * π * 30
+                      strokeDashoffset={x.to(val => {
+                        const progress = Math.min(Math.abs(Math.min(val, 0)) / 150, 1);
+                        return 188.5 * (1 - progress);
+                      })}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {/* White filled circle at threshold with extra padding to cover separator */}
+                  <animated.div
+                    className="absolute inset-0 rounded-full flex items-center justify-center"
+                    style={{
+                      backgroundColor: x.to(val => val <= -150 ? 'white' : 'transparent'),
+                      margin: '-4px', // Extend beyond circle to cover any lines
+                      width: '72px',
+                      height: '72px'
+                    }}
+                  >
+                    <animated.svg
+                      className="w-9 h-9"
+                      viewBox="0 0 24 24"
+                      style={{
+                        fill: x.to(val => val <= -150 ? '#ef4444' : 'white')
+                      }}
+                    >
+                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                    </animated.svg>
+                  </animated.div>
+                </div>
+                <span className="text-xl font-extrabold">INCORRECT</span>
               </animated.div>
             </animated.div>
           </div>
@@ -292,14 +386,14 @@ export function SlackCard({
         )}
 
         {/* Header with reference */}
-        <div className="p-4 border-b border-primary/10 flex-shrink-0 z-30">
+        <div className="p-4 border-b border-primary/10 flex-shrink-0 z-10">
           <h2 className="text-xl font-bold text-primary text-center">
             {verse.reference}
           </h2>
         </div>
 
         {/* Main content area */}
-        <div className="flex-1 flex flex-col justify-center p-4 min-h-0 z-30">
+        <div className="flex-1 flex flex-col justify-center p-4 min-h-0 z-10">
           {!showingText ? (
             <div className="text-center" onClick={handleToggleText}>
               <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 cursor-pointer hover:bg-primary/20 transition-colors">
