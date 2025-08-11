@@ -79,13 +79,13 @@ export function SlackCard({
 
     if (down) {
       // BUTTERY SMOOTH: 1:1 movement anywhere on screen with dynamic effects
-      const rotationAmount = mx * 0.1; // Subtle rotation based on horizontal movement
+      const rotationAmount = -Math.sign(mx) * Math.min(Math.abs(mx) * 0.025, 360); // Tilt up towards swipe direction, max 15 degrees
       const scaleAmount = Math.max(0.9, 1 - Math.abs(mx) / 800); // Scale down slightly when dragging far
 
-      // Immediate updates for buttery smooth dragging
+      // Slightly dampened dragging for more control
       api.start({
-        x: mx,
-        y: my,
+        x: mx * 0.7,
+        y: my * 0.7,
         rotate: rotationAmount,
         scale: scaleAmount,
         immediate: true
@@ -94,9 +94,9 @@ export function SlackCard({
       // On release
       setIsDragging(false);
 
-      // Check if should commit swipe (horizontal threshold only)
-      const THRESHOLD = 120; // Reduced for mobile
-      const VELOCITY_THRESHOLD = 600; // Reduced for mobile
+      // Check if should commit swipe (horizontal threshold only) - Mobile optimized
+      const THRESHOLD = 120; // Good balance for mobile - not too easy, not too hard
+      const VELOCITY_THRESHOLD = 400; // Reduced for mobile - faster swipes trigger easier
 
       if (Math.abs(mx) > THRESHOLD || Math.abs(vx) > VELOCITY_THRESHOLD) {
         // Swipe to dismiss - animate completely off screen like Tinder
@@ -110,7 +110,7 @@ export function SlackCard({
         api.start({
           x: exitX,
           y: exitY,
-          rotate: direction === 'right' ? 30 : -30,
+          rotate: direction === 'right' ? -15 : 15, // Tilt up on exit
           scale: 0.7,
           config: {
             tension: 180,
@@ -232,18 +232,18 @@ export function SlackCard({
               style={{
                 background: x.to(val => {
                   if (!isDragging || val <= 0) return 'transparent';
-                  const progress = Math.min(val / 150, 1);
-                  const darkOpacity = 0.4 + (progress * 0.55); // 0.4 to 0.95
-                  const lightOpacity = 0.2 + (progress * 0.5); // 0.2 to 0.7
-                  return `radial-gradient(ellipse 200% 180% at top left, rgba(34, 197, 94, ${darkOpacity}) 0%, rgba(34, 197, 94, ${darkOpacity * 0.9}) 30%, rgba(34, 197, 94, ${lightOpacity}) 70%, rgba(34, 197, 94, ${lightOpacity * 0.3}) 100%)`;
+                  const progress = Math.min(val / 120, 1); // Match swipe threshold
+                  const darkOpacity = 0.8 + (progress * 0.2); // 0.8 to 1.0 (very dark)
+                  const lightOpacity = 0.2 + (progress * 0.1); // 0.2 to 0.3 (slightly more opaque)
+                  return `linear-gradient(135deg, rgba(34, 197, 94, ${lightOpacity}) 0%, rgba(34, 197, 94, ${darkOpacity * 0.7}) 20%, rgba(34, 197, 94, ${darkOpacity * 0.9}) 50%, rgba(34, 197, 94, ${darkOpacity}) 100%)`;
                 }),
-                opacity: x.to(val => val > 0 && isDragging ? 0.05 + (Math.min(val / 150, 1) * 0.9) : 0)
+                opacity: x.to(val => val > 0 && isDragging ? 0.05 + (Math.min(val / 80, 1) * 0.9) : 0) // Match threshold
               }}
             >
               <animated.div
-                className="absolute top-2 left-2 flex flex-col items-center gap-3 text-white font-bold text-2xl"
+                className="absolute top-2 left-1 flex flex-col items-start gap-3 text-white font-bold text-4xl"
                 style={{
-                  opacity: x.to(val => val >= 150 ? 1 : (val > 10 ? Math.min((val - 10) / 80, 0.9) : 0)),
+                  opacity: x.to(val => val >= 80 ? 1 : (val > 10 ? Math.min((val - 10) / 70, 0.9) : 0)), // Match threshold
                   transform: x.to(val => `translateX(${Math.min(val * 0.1, 20)}px)`),
                   zIndex: 2000
                 }}
@@ -270,7 +270,7 @@ export function SlackCard({
                       strokeWidth="3"
                       strokeDasharray="188.5" // 2 * π * 30
                       strokeDashoffset={x.to(val => {
-                        const progress = Math.min(Math.max(val, 0) / 150, 1);
+                        const progress = Math.min(Math.max(val, 0) / 120, 1); // Match swipe threshold
                         return 188.5 * (1 - progress);
                       })}
                       strokeLinecap="round"
@@ -280,7 +280,7 @@ export function SlackCard({
                   <animated.div
                     className="absolute inset-0 rounded-full flex items-center justify-center"
                     style={{
-                      backgroundColor: x.to(val => val >= 150 ? 'white' : 'transparent'),
+                      backgroundColor: x.to(val => val >= 80 ? 'white' : 'transparent'), // Match swipe threshold
                       margin: '-4px', // Extend beyond circle to cover any lines
                       width: '72px',
                       height: '72px'
@@ -290,14 +290,14 @@ export function SlackCard({
                       className="w-9 h-9"
                       viewBox="0 0 24 24"
                       style={{
-                        fill: x.to(val => val >= 150 ? '#22c55e' : 'white')
+                        fill: x.to(val => val >= 80 ? '#22c55e' : 'white') // Match swipe threshold
                       }}
                     >
                       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                     </animated.svg>
                   </animated.div>
                 </div>
-                <span className="text-xl font-extrabold">CORRECT</span>
+                <span className="text-3xl font-extrabold text-left">CORRECT</span>
               </animated.div>
             </animated.div>
 
@@ -307,18 +307,18 @@ export function SlackCard({
               style={{
                 background: x.to(val => {
                   if (!isDragging || val >= 0) return 'transparent';
-                  const progress = Math.min(Math.abs(val) / 150, 1);
-                  const darkOpacity = 0.4 + (progress * 0.55); // 0.4 to 0.95
-                  const lightOpacity = 0.2 + (progress * 0.5); // 0.2 to 0.7
-                  return `radial-gradient(ellipse 200% 180% at top right, rgba(239, 68, 68, ${darkOpacity}) 0%, rgba(239, 68, 68, ${darkOpacity * 0.9}) 30%, rgba(239, 68, 68, ${lightOpacity}) 70%, rgba(239, 68, 68, ${lightOpacity * 0.3}) 100%)`;
+                  const progress = Math.min(Math.abs(val) / 120, 1); // Match swipe threshold
+                  const darkOpacity = 0.8 + (progress * 0.2); // 0.8 to 1.0 (very dark)
+                  const lightOpacity = 0.2 + (progress * 0.1); // 0.2 to 0.3 (slightly more opaque)
+                  return `linear-gradient(225deg, rgba(239, 68, 68, ${lightOpacity}) 0%, rgba(239, 68, 68, ${darkOpacity * 0.7}) 20%, rgba(239, 68, 68, ${darkOpacity * 0.9}) 50%, rgba(239, 68, 68, ${darkOpacity}) 100%)`;
                 }),
-                opacity: x.to(val => val < 0 && isDragging ? 0.05 + (Math.min(Math.abs(val) / 150, 1) * 0.9) : 0)
+                opacity: x.to(val => val < 0 && isDragging ? 0.05 + (Math.min(Math.abs(val) / 80, 1) * 0.9) : 0) // Match threshold
               }}
             >
               <animated.div
-                className="absolute top-2 right-2 flex flex-col items-center gap-3 text-white font-bold text-2xl"
+                className="absolute top-2 right-1 flex flex-col items-end gap-3 text-white font-bold text-4xl"
                 style={{
-                  opacity: x.to(val => val <= -150 ? 1 : (val < -10 ? Math.min((Math.abs(val) - 10) / 80, 0.9) : 0)),
+                  opacity: x.to(val => val <= -80 ? 1 : (val < -10 ? Math.min((Math.abs(val) - 10) / 70, 0.9) : 0)), // Match threshold
                   transform: x.to(val => `translateX(${Math.max(val * 0.1, -20)}px)`),
                   zIndex: 2000
                 }}
@@ -345,7 +345,7 @@ export function SlackCard({
                       strokeWidth="3"
                       strokeDasharray="188.5" // 2 * π * 30
                       strokeDashoffset={x.to(val => {
-                        const progress = Math.min(Math.abs(Math.min(val, 0)) / 150, 1);
+                        const progress = Math.min(Math.abs(Math.min(val, 0)) / 120, 1); // Match swipe threshold
                         return 188.5 * (1 - progress);
                       })}
                       strokeLinecap="round"
@@ -355,7 +355,7 @@ export function SlackCard({
                   <animated.div
                     className="absolute inset-0 rounded-full flex items-center justify-center"
                     style={{
-                      backgroundColor: x.to(val => val <= -150 ? 'white' : 'transparent'),
+                      backgroundColor: x.to(val => val <= -80 ? 'white' : 'transparent'), // Match swipe threshold
                       margin: '-4px', // Extend beyond circle to cover any lines
                       width: '72px',
                       height: '72px'
@@ -365,14 +365,14 @@ export function SlackCard({
                       className="w-9 h-9"
                       viewBox="0 0 24 24"
                       style={{
-                        fill: x.to(val => val <= -150 ? '#ef4444' : 'white')
+                        fill: x.to(val => val <= -80 ? '#ef4444' : 'white') // Match swipe threshold
                       }}
                     >
                       <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                     </animated.svg>
                   </animated.div>
                 </div>
-                <span className="text-xl font-extrabold">INCORRECT</span>
+                <span className="text-3xl font-extrabold text-right">INCORRECT</span>
               </animated.div>
             </animated.div>
           </div>
