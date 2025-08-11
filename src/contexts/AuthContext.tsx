@@ -110,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    let cancelled = false; // Flag to prevent double execution in Strict Mode
+    const cancelled = false; // Flag to prevent double execution in Strict Mode
     
     // Helper function to check if current URL contains auth verification tokens
     const isAuthVerificationCallback = () => {

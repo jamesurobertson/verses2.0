@@ -61,5 +61,5 @@ export const buttonStyles = ({ variant, size, disabled }: ButtonStylesProps): st
     ...sizeStyles[size],
   ].filter(Boolean);
 
-  return allStyles.join(' ') + ` ${variant}`;
+  return allStyles.join(' ');
 };

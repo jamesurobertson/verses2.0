@@ -32,7 +32,7 @@ export type ReviewPhase = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 
 // Enhanced library verse card with assignment fields
 export interface LibraryVerseCardWithAssignments {
-  id: number;
+  id: string;
   currentPhase: ReviewPhase;
   archived: boolean;
   assignedDayOfWeek: number | null;
@@ -43,7 +43,7 @@ export interface LibraryVerseCardWithAssignments {
   bestStreak: number;
   lastReviewedAt: string | null;
   verse: {
-    id: number;
+    id: string;
     reference: string;
     text: string;
     translation: string;
@@ -83,7 +83,7 @@ export interface PhaseTransition {
 
 // User profile with timezone information  
 export interface UserProfileWithTimezone {
-  id: number;
+  id: string;
   user_id: string;
   email: string | null;
   full_name: string | null;

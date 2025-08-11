@@ -39,6 +39,10 @@ export function Review() {
     }
   };
 
+  const handleButtonClick = (direction: 'left' | 'right') => {
+    handleSwipe(direction);
+  };
+
   const handleCompleteSession = async () => {
     await completeSession();
     navigate('/library');
@@ -48,7 +52,7 @@ export function Review() {
   if (error) {
     return (
       <div className="fixed inset-0 bg-background flex items-center justify-center p-4" style={{ height: '100dvh' }}>
-        <ErrorCard 
+        <ErrorCard
           title="Failed to load review session"
           message={error}
           onRetry={refreshDueCards}
@@ -76,10 +80,10 @@ export function Review() {
     return (
       <div className="fixed inset-0 bg-background flex items-center justify-center p-4" style={{ height: '100dvh' }}>
         {dueCards.length === 0 ? (
-          <EmptyState 
+          <EmptyState
             title="All caught up!"
-            description={todaysCards.length === 0 
-              ? "No cards due for review today. Great job!" 
+            description={todaysCards.length === 0
+              ? "No cards due for review today. Great job!"
               : `Great work! You reviewed ${todaysCards.length} verse${todaysCards.length !== 1 ? 's' : ''} today.`
             }
             actionText={todaysCards.length > 0 ? `Review Today's Cards (${todaysCards.length})` : "View Library"}
@@ -88,7 +92,7 @@ export function Review() {
           />
         ) : (
           <div className="text-center max-w-md">
-            <EmptyState 
+            <EmptyState
               title={`${dueCards.length} verses ready`}
               description="Ready to review your verses?"
               actionText="Start Review Session"
@@ -122,7 +126,7 @@ export function Review() {
     return (
       <div className="fixed inset-0 bg-background" style={{ height: '100dvh' }}>
         {/* Floating Header */}
-        <div 
+        <div
           className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between p-4"
           style={{ paddingTop: 'env(safe-area-inset-top, 16px)' }}
           data-testid="header-overlay"
@@ -145,7 +149,7 @@ export function Review() {
               You completed your review session
             </p>
             <p className="text-primary/70 mb-8">
-              Score: {sessionProgress.correctCount}/{sessionProgress.total} 
+              Score: {sessionProgress.correctCount}/{sessionProgress.total}
               ({Math.round((sessionProgress.correctCount / sessionProgress.total) * 100)}%)
             </p>
 
@@ -158,14 +162,14 @@ export function Review() {
                   Review Incorrect Verses ({sessionProgress.incorrectCount})
                 </button>
               )}
-              
+
               <button
                 onClick={startSession}
                 className="w-full px-6 py-3 bg-primary/10 text-primary border border-primary/20 rounded-lg font-medium hover:bg-primary/20 transition-colors"
               >
                 Review All Again
               </button>
-              
+
               <button
                 onClick={handleCompleteSession}
                 className="w-full px-6 py-3 bg-success text-black rounded-lg font-medium hover:bg-success/90 transition-colors"
@@ -183,12 +187,12 @@ export function Review() {
   return (
     <div className="fixed inset-0 bg-background" style={{ height: '100dvh' }}>
       {/* Floating Header Overlay */}
-      <div 
+      <div
         className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between p-4"
         style={{ paddingTop: 'env(safe-area-inset-top, 16px)' }}
         data-testid="header-overlay"
       >
-        <button 
+        <button
           onClick={handleCompleteSession}
           className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-primary/10 transition-colors"
         >
@@ -196,28 +200,27 @@ export function Review() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        
+
         <div className="text-center">
           <span className="text-primary font-medium">
             {sessionProgress.total - sessionProgress.current} Left
           </span>
         </div>
-        
+
         <button
           onClick={undoLastAction}
           disabled={session?.actions.length === 0}
-          className={`px-3 py-1 rounded-lg font-medium text-sm transition-colors ${
-            session?.actions.length === 0 
-              ? 'text-primary/30 cursor-not-allowed' 
-              : 'text-primary hover:bg-primary/10'
-          }`}
+          className={`px-3 py-1 rounded-lg font-medium text-sm transition-colors ${session?.actions.length === 0
+            ? 'text-primary/30 cursor-not-allowed'
+            : 'text-primary hover:bg-primary/10'
+            }`}
         >
           Undo
         </button>
       </div>
 
       {/* Card Stack Area */}
-      <div className="absolute inset-0 flex items-center justify-center p-4" style={{ paddingTop: '80px', paddingBottom: '140px' }}>
+      <div className="absolute inset-0 flex items-center justify-center p-4" style={{ paddingTop: '80px', paddingBottom: '120px' }}>
         {currentCard && (
           <div className="w-full max-w-lg h-full max-h-[500px] relative">
             <SlackCard
@@ -234,22 +237,22 @@ export function Review() {
       </div>
 
       {/* Floating Bottom Buttons */}
-      <div 
-        className="absolute bottom-0 left-0 right-0 z-50 flex gap-4 p-4"
+      <div
+        className="absolute bottom-5 left-0 right-0 z-50 flex gap-4 p-4 bg-background/80 backdrop-blur-sm"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
         data-testid="footer-overlay"
       >
-        <button 
-          className="flex-1 py-3 border-2 border-red-500 text-red-500 rounded-lg font-medium hover:bg-red-50 active:bg-red-100 transition-colors min-h-[44px]"
+        <button
+          className="flex-1 py-4 px-6 border-2 border-red-500 text-red-500 rounded-xl font-medium active:bg-red-100 active:scale-95 transition-all duration-150 min-h-[56px]"
           onClick={() => handleSwipe('left')}
         >
           Mark Incorrect
         </button>
-        <button 
-          className="flex-1 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 active:bg-green-700 transition-colors min-h-[44px]"
+        <button
+          className="flex-1 py-4 px-6 bg-green-500 text-white rounded-xl font-medium active:bg-green-700 active:scale-95 transition-all duration-150 min-h-[56px]"
           onClick={() => handleSwipe('right')}
         >
-          Mark Correct  
+          Mark Correct
         </button>
       </div>
 

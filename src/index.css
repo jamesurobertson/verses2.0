@@ -97,37 +97,22 @@ body {
   background-color: rgba(28, 42, 57, 0.4);
 }
 
-/* Mobile touch optimization for swipeable cards */
-.swipeable-card {
-  /* Prevent iOS text selection and context menus */
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-drag: none;
-  user-select: none;
-  
-  /* Optimize touch performance */
-  touch-action: none;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-  will-change: transform;
+/* Smooth swipe exit animation that starts from current drag position */
+.animate-swipe-exit {
+  animation: swipeExit 0.8s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
 }
 
-/* Prevent body scroll during card dragging on mobile */
-body.dragging {
-  overflow: hidden !important;
-  position: fixed !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/* iOS-specific optimizations */
-@supports (-webkit-touch-callout: none) {
-  .swipeable-card {
-    /* iOS Safari optimizations */
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-    -webkit-perspective: 1000px;
-    perspective: 1000px;
+@keyframes swipeExit {
+  0% {
+    transform: translateX(var(--start-x, 0px)) translateY(var(--start-y, 0px)) rotate(var(--start-rotate, 0deg)) scale(1);
+    opacity: 1;
+  }
+  90% {
+    transform: translateX(var(--end-x, 100vw)) translateY(var(--end-y, 0px)) rotate(calc(var(--start-rotate, 0deg) + 25deg)) scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(var(--end-x, 100vw)) translateY(var(--end-y, 0px)) rotate(calc(var(--start-rotate, 0deg) + 25deg)) scale(0.8);
+    opacity: 0;
   }
 }

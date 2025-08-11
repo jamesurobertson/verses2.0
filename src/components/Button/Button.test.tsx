@@ -19,7 +19,7 @@ describe('Button Component', () => {
   test('applies correct variant styles', () => {
     render(<Button variant="secondary" data-testid="test-button">Test</Button>);
     const button = screen.getByTestId('test-button');
-    expect(button).toHaveClass('secondary');
+    expect(button).toHaveClass('bg-primary/10');
   });
 
   test('disables button when disabled prop is true', () => {

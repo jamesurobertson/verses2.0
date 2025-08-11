@@ -27,7 +27,7 @@ export function AppRouter() {
   // Always show main app - authentication is now optional
   return (
     <Routes>
-      <Route path="/" element={<Layout title="Review"><Review /></Layout>} />
+      <Route path="/" element={<Review />} />
       <Route path="/review" element={<Review />} />
       <Route path="/library" element={<Layout title="Library"><Library /></Layout>} />
       <Route path="/library/:reference" element={<Layout title="Verse Details"><VerseDetails /></Layout>} />

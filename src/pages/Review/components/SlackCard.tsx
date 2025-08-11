@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
+// Try the old import style to match working example
 import { useDrag } from '@use-gesture/react';
 import { useSpring, animated } from '@react-spring/web';
 import type { LibraryVerseCard } from '../../Library/hooks/useLibrary';
@@ -52,96 +53,82 @@ export function SlackCard({
     isComplete
   } = useTextRevelation(verse.text, textMode);
 
-  // React Spring for smooth animations
+  // React Spring for smooth animations - function form needed for api.start()
   const [{ x, y, rotate, scale }, api] = useSpring(() => ({
     x: 0,
     y: 0,
     rotate: 0,
-    scale: 1
-  }));
-
-  // @use-gesture drag configuration - MOBILE-OPTIMIZED DRAGGING
-  const bind = useDrag(({
-    down,
-    movement: [mx, my],
-    velocity: [vx, vy],
-    direction: [dx],
-    first,
-    last,
-    event
-  }) => {
-    // Only allow dragging on top card
-    if (!isTopCard) return;
-
-    if (first) {
-      setIsDragging(true);
+    scale: 1,
+    config: {
+      tension: 180,
+      friction: 20,
+      mass: 0.8
     }
+  }), []);
+
+  // Track if card has been swiped away and in which direction
+  const [exitState, setExitState] = useState<{isGone: boolean, direction: 'left' | 'right' | null}>({
+    isGone: false,
+    direction: null
+  });
+
+  // Simple drag configuration with tap filtering
+  const bind = useDrag(({ down, movement: [mx, my], direction: [xDir], velocity: [vx, vy], tap }) => {
+    if (!isTopCard || exitState.isGone) return;
+
+    // Ignore tap events - let onClick handle taps
+    if (tap) return;
 
     if (down) {
-      // BUTTERY SMOOTH: 1:1 movement anywhere on screen with dynamic effects
-      const rotationAmount = -Math.sign(mx) * Math.min(Math.abs(mx) * 0.025, 360); // Tilt up towards swipe direction, max 15 degrees
-      const scaleAmount = Math.max(0.9, 1 - Math.abs(mx) / 800); // Scale down slightly when dragging far
-
-      // Slightly dampened dragging for more control
-      api.start({
-        x: mx * 0.7,
-        y: my * 0.7,
-        rotate: rotationAmount,
-        scale: scaleAmount,
-        immediate: true
-      });
-    } else {
-      // On release
-      setIsDragging(false);
-
-      // Check if should commit swipe (horizontal threshold only) - Mobile optimized
-      const THRESHOLD = 120; // Good balance for mobile - not too easy, not too hard
-      const VELOCITY_THRESHOLD = 400; // Reduced for mobile - faster swipes trigger easier
-
-      if (Math.abs(mx) > THRESHOLD || Math.abs(vx) > VELOCITY_THRESHOLD) {
-        // Swipe to dismiss - animate completely off screen like Tinder
-        const direction = mx > 0 ? 'right' : 'left';
-        const screenWidth = window.innerWidth;
-        const exitX = direction === 'right' ? screenWidth + 400 : -(screenWidth + 400);
-        const exitY = my + (vy * 0.2); // Continue momentum in exit direction
-
-        console.log(`Mobile swipe ${direction} detected - mx: ${mx}, vx: ${vx}, animating to x: ${exitX}`);
-
+      // Only start drag animation if movement is significant
+      if (Math.abs(mx) > 5 || Math.abs(my) > 5) {
+        // Follow finger
         api.start({
-          x: exitX,
-          y: exitY,
-          rotate: direction === 'right' ? -15 : 15, // Tilt up on exit
-          scale: 0.7,
-          config: {
-            tension: 180,
-            friction: 20,
-            mass: 0.8
-          }
+          x: mx,
+          y: my, 
+          rotate: mx / 100,
+          scale: 1.05,
+          immediate: true
         });
-
-        // Call onSwipe immediately to advance to next card
-        onSwipe(direction);
-        return;
+        setIsDragging(true);
       }
-
-      // CUTE AND BUBBLY BOUNCE BACK - with slight overshoot for adorable bump
-      api.start({
-        x: 0,
-        y: 0,
-        rotate: 0,
-        scale: 1,
-        config: {
-          tension: 300,    // Medium tension for bouncy return
-          friction: 20,    // Lower friction for more bounce/overshoot
-          mass: 1.2        // Higher mass for more pronounced bounce
+    } else {
+      setIsDragging(false);
+      
+      // Check for swipe - match visual threshold
+      const trigger = Math.abs(vx) > 0.2 || Math.abs(mx) > 80;
+      
+      if (trigger) {
+        const direction = xDir < 0 ? 'left' : 'right';
+        
+        // Get current position and set up CSS animation
+        const cardElement = document.querySelector('[data-testid="verse-card"]') as HTMLElement;
+        if (cardElement) {
+          cardElement.style.setProperty('--start-x', `${x.get()}px`);
+          cardElement.style.setProperty('--start-y', `${y.get()}px`);
+          cardElement.style.setProperty('--start-rotate', `${rotate.get()}deg`);
+          cardElement.style.setProperty('--end-x', direction === 'right' ? '120vw' : '-120vw');
+          cardElement.style.setProperty('--end-y', `${y.get() + (vy * 50)}px`);
         }
-      });
+        
+        setExitState({ isGone: true, direction });
+        
+        // Advance after animation
+        setTimeout(() => onSwipe(direction), 800);
+      } else {
+        // Bounce back with jiggle - debug version
+        console.log('Bounce back triggered, current x:', x.get());
+        api.start({
+          x: 0, y: 0, rotate: 0, scale: 1,
+          config: { tension: 800, friction: 8, mass: 1 }, // Much more oscillation
+          onChange: (result) => console.log('Bounce animation onChange:', result),
+          onRest: () => console.log('Bounce animation complete')
+        });
+      }
     }
   }, {
-    // SIMPLIFIED: Basic drag configuration that works
-    filterTaps: true,       // Filter accidental taps
-    axis: undefined,        // Allow all directions
-    rubberband: false      // No resistance
+    filterTaps: true, // Filter out tap events from drag handling
+    threshold: 5      // Minimum movement before drag starts
   });
 
   // Card stack styling with CSS transforms
@@ -155,6 +142,21 @@ export function SlackCard({
       transform: `scale(${scale}) translateY(${translateY}px) rotate(${rotation}deg)`,
       zIndex,
       boxShadow: `0 ${8 + stackIndex * 4}px ${15 + stackIndex * 10}px rgba(0,0,0,${0.15 - stackIndex * 0.02})`
+    };
+  };
+
+  // Background card stack styling - identical to top card styling
+  const getBgStackStyle = (bgIndex: number) => {
+    const zIndex = 5 - bgIndex; // Just behind top card (top card has z-index 20)
+
+    return {
+      // Copy exact styling from getTopCardStyle() but without dragging state
+      zIndex,
+      boxShadow: '0 10px 20px rgba(0,0,0,0.15)', // Same as non-dragging top card
+      willChange: 'transform',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      opacity: 1 // Full opacity - pure white background
     };
   };
 
@@ -183,24 +185,40 @@ export function SlackCard({
   return (
     <div className="relative h-full w-full overflow-visible">
       {/* Background Cards */}
-      {backgroundCards.slice(0, 2).map((bgCard) => (
+      {backgroundCards.slice(0, 1).map((bgCard, bgIndex) => (
         <div
           key={`bg-${bgCard.id}`}
           className="absolute inset-0 bg-white rounded-2xl border border-primary/20 overflow-hidden pointer-events-none"
-          style={getStackStyle()}
+          style={getBgStackStyle(bgIndex)}
         >
-          {/* Background card preview */}
-          <div className="p-4 border-b border-primary/10">
-            <h3 className="text-lg font-bold text-primary/70 text-center">
+          {/* Background card header - same as top card */}
+          <div className="p-4 border-b border-primary/10 flex-shrink-0 z-10">
+            <h2 className="text-xl font-bold text-primary text-center">
               {bgCard.verse.reference}
-            </h3>
+            </h2>
           </div>
-          <div className="p-4 flex items-center justify-center h-full">
+
+          {/* Background card body - same blurred text as top card */}
+          <div className="flex-1 flex flex-col justify-center p-4 min-h-0 z-10">
             <div className="text-center">
-              <svg className="w-12 h-12 text-primary/30 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-              <p className="text-sm text-primary/40">Coming up</p>
+              <div className="max-h-80 overflow-y-auto">
+                <p
+                  className="text-primary text-2xl leading-relaxed mb-4 select-none"
+                  style={{ 
+                    fontFamily: 'serif',
+                    filter: 'blur(4px)',
+                    WebkitFilter: 'blur(4px)'
+                  }}
+                >
+                  "{bgCard.verse.text}"
+                </p>
+                <cite className="text-primary/70 text-lg font-medium" style={{ filter: 'blur(2px)' }}>
+                  — {bgCard.verse.reference}
+                </cite>
+                <p className="text-primary/50 text-sm mt-4">
+                  Tap to reveal verse clearly
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -212,18 +230,21 @@ export function SlackCard({
         className={`
           absolute inset-0 bg-white rounded-2xl border border-primary/10 
           flex flex-col overflow-hidden cursor-grab active:cursor-grabbing
-          ${isTopCard ? 'swipeable-card' : ''}
+          ${exitState.isGone ? 'animate-swipe-exit' : ''}
         `}
-        style={isTopCard ? {
-          ...getTopCardStyle(),
-          x,
-          y,
-          rotate: rotate.to(r => `${r}deg`),
-          scale
-        } : getStackStyle()}
+        style={{
+          touchAction: 'none', // Fix @use-gesture warning
+          ...(isTopCard ? {
+            ...getTopCardStyle(),
+            x,
+            y,
+            rotate: rotate.to(r => `${r}deg`),
+            scale
+          } : getStackStyle())
+        }}
         data-testid="verse-card"
       >
-        {/* Swipe Overlays - Best Practice Structure */}
+        {/* Swipe Overlays - Show during drag and exit animation */}
         {isTopCard && (
           <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 1000 }}>
             {/* Green Right Swipe Overlay (Correct) */}
@@ -231,20 +252,27 @@ export function SlackCard({
               className="absolute inset-0 rounded-2xl flex items-center justify-center"
               style={{
                 background: x.to(val => {
-                  if (!isDragging || val <= 0) return 'transparent';
-                  const progress = Math.min(val / 120, 1); // Match swipe threshold
+                  // Show during drag or exit animation for right direction
+                  if ((!isDragging && exitState.direction !== 'right') || (isDragging && val <= 0)) return 'transparent';
+                  const progress = isDragging ? Math.min(val / 80, 1) : 1; // Match 80px threshold
                   const darkOpacity = 0.8 + (progress * 0.2); // 0.8 to 1.0 (very dark)
                   const lightOpacity = 0.2 + (progress * 0.1); // 0.2 to 0.3 (slightly more opaque)
                   return `linear-gradient(135deg, rgba(34, 197, 94, ${lightOpacity}) 0%, rgba(34, 197, 94, ${darkOpacity * 0.7}) 20%, rgba(34, 197, 94, ${darkOpacity * 0.9}) 50%, rgba(34, 197, 94, ${darkOpacity}) 100%)`;
                 }),
-                opacity: x.to(val => val > 0 && isDragging ? 0.05 + (Math.min(val / 80, 1) * 0.9) : 0) // Match threshold
+                opacity: x.to(val => {
+                  if (exitState.direction === 'right') return 0.95; // Full opacity during exit
+                  return val > 0 && isDragging ? 0.05 + (Math.min(val / 80, 1) * 0.9) : 0;
+                })
               }}
             >
               <animated.div
-                className="absolute top-2 left-1 flex flex-col items-start gap-3 text-white font-bold text-4xl"
+                className="absolute top-4 left-4 flex flex-col items-start gap-3 text-white font-bold text-4xl"
                 style={{
-                  opacity: x.to(val => val >= 80 ? 1 : (val > 10 ? Math.min((val - 10) / 70, 0.9) : 0)), // Match threshold
-                  transform: x.to(val => `translateX(${Math.min(val * 0.1, 20)}px)`),
+                  opacity: x.to(val => {
+                    if (exitState.direction === 'right') return 1; // Full opacity during exit
+                    return val >= 80 ? 1 : (val > 10 ? Math.min((val - 10) / 70, 0.9) : 0);
+                  }),
+                  transform: 'translateX(0px)', // Keep static position relative to card
                   zIndex: 2000
                 }}
               >
@@ -270,7 +298,7 @@ export function SlackCard({
                       strokeWidth="3"
                       strokeDasharray="188.5" // 2 * π * 30
                       strokeDashoffset={x.to(val => {
-                        const progress = Math.min(Math.max(val, 0) / 120, 1); // Match swipe threshold
+                        const progress = Math.min(Math.max(val, 0) / 80, 1); // Match threshold at 80px
                         return 188.5 * (1 - progress);
                       })}
                       strokeLinecap="round"
@@ -280,7 +308,10 @@ export function SlackCard({
                   <animated.div
                     className="absolute inset-0 rounded-full flex items-center justify-center"
                     style={{
-                      backgroundColor: x.to(val => val >= 80 ? 'white' : 'transparent'), // Match swipe threshold
+                      backgroundColor: x.to(val => {
+                        if (exitState.direction === 'right') return 'white'; // Show during exit
+                        return val >= 80 ? 'white' : 'transparent';
+                      }),
                       margin: '-4px', // Extend beyond circle to cover any lines
                       width: '72px',
                       height: '72px'
@@ -290,7 +321,10 @@ export function SlackCard({
                       className="w-9 h-9"
                       viewBox="0 0 24 24"
                       style={{
-                        fill: x.to(val => val >= 80 ? '#22c55e' : 'white') // Match swipe threshold
+                        fill: x.to(val => {
+                          if (exitState.direction === 'right') return '#22c55e'; // Green during exit
+                          return val >= 80 ? '#22c55e' : 'white';
+                        })
                       }}
                     >
                       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
@@ -306,20 +340,27 @@ export function SlackCard({
               className="absolute inset-0 rounded-2xl flex items-center justify-center"
               style={{
                 background: x.to(val => {
-                  if (!isDragging || val >= 0) return 'transparent';
-                  const progress = Math.min(Math.abs(val) / 120, 1); // Match swipe threshold
+                  // Show during drag or exit animation for left direction
+                  if ((!isDragging && exitState.direction !== 'left') || (isDragging && val >= 0)) return 'transparent';
+                  const progress = isDragging ? Math.min(Math.abs(val) / 80, 1) : 1; // Match 80px threshold
                   const darkOpacity = 0.8 + (progress * 0.2); // 0.8 to 1.0 (very dark)
                   const lightOpacity = 0.2 + (progress * 0.1); // 0.2 to 0.3 (slightly more opaque)
                   return `linear-gradient(225deg, rgba(239, 68, 68, ${lightOpacity}) 0%, rgba(239, 68, 68, ${darkOpacity * 0.7}) 20%, rgba(239, 68, 68, ${darkOpacity * 0.9}) 50%, rgba(239, 68, 68, ${darkOpacity}) 100%)`;
                 }),
-                opacity: x.to(val => val < 0 && isDragging ? 0.05 + (Math.min(Math.abs(val) / 80, 1) * 0.9) : 0) // Match threshold
+                opacity: x.to(val => {
+                  if (exitState.direction === 'left') return 0.95; // Full opacity during exit
+                  return val < 0 && isDragging ? 0.05 + (Math.min(Math.abs(val) / 80, 1) * 0.9) : 0;
+                })
               }}
             >
               <animated.div
-                className="absolute top-2 right-1 flex flex-col items-end gap-3 text-white font-bold text-4xl"
+                className="absolute top-4 right-4 flex flex-col items-end gap-3 text-white font-bold text-4xl"
                 style={{
-                  opacity: x.to(val => val <= -80 ? 1 : (val < -10 ? Math.min((Math.abs(val) - 10) / 70, 0.9) : 0)), // Match threshold
-                  transform: x.to(val => `translateX(${Math.max(val * 0.1, -20)}px)`),
+                  opacity: x.to(val => {
+                    if (exitState.direction === 'left') return 1; // Full opacity during exit
+                    return val <= -80 ? 1 : (val < -10 ? Math.min((Math.abs(val) - 10) / 70, 0.9) : 0);
+                  }),
+                  transform: 'translateX(0px)', // Keep static position relative to card
                   zIndex: 2000
                 }}
               >
@@ -345,7 +386,7 @@ export function SlackCard({
                       strokeWidth="3"
                       strokeDasharray="188.5" // 2 * π * 30
                       strokeDashoffset={x.to(val => {
-                        const progress = Math.min(Math.abs(Math.min(val, 0)) / 120, 1); // Match swipe threshold
+                        const progress = Math.min(Math.abs(Math.min(val, 0)) / 80, 1); // Match threshold at 80px
                         return 188.5 * (1 - progress);
                       })}
                       strokeLinecap="round"
@@ -355,7 +396,10 @@ export function SlackCard({
                   <animated.div
                     className="absolute inset-0 rounded-full flex items-center justify-center"
                     style={{
-                      backgroundColor: x.to(val => val <= -80 ? 'white' : 'transparent'), // Match swipe threshold
+                      backgroundColor: x.to(val => {
+                        if (exitState.direction === 'left') return 'white'; // Show during exit
+                        return val <= -80 ? 'white' : 'transparent';
+                      }),
                       margin: '-4px', // Extend beyond circle to cover any lines
                       width: '72px',
                       height: '72px'
@@ -365,7 +409,10 @@ export function SlackCard({
                       className="w-9 h-9"
                       viewBox="0 0 24 24"
                       style={{
-                        fill: x.to(val => val <= -80 ? '#ef4444' : 'white') // Match swipe threshold
+                        fill: x.to(val => {
+                          if (exitState.direction === 'left') return '#ef4444'; // Red during exit
+                          return val <= -80 ? '#ef4444' : 'white';
+                        })
                       }}
                     >
                       <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
@@ -395,13 +442,26 @@ export function SlackCard({
         {/* Main content area */}
         <div className="flex-1 flex flex-col justify-center p-4 min-h-0 z-10">
           {!showingText ? (
-            <div className="text-center" onClick={handleToggleText}>
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 cursor-pointer hover:bg-primary/20 transition-colors">
-                <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
+            <div className="text-center cursor-pointer" onClick={handleToggleText}>
+              <div className="max-h-80 overflow-y-auto">
+                <p
+                  className="text-primary text-2xl leading-relaxed mb-4 select-none"
+                  style={{ 
+                    fontFamily: 'serif',
+                    filter: 'blur(4px)',
+                    WebkitFilter: 'blur(4px)',
+                    transition: 'filter 0.3s ease'
+                  }}
+                >
+                  "{verse.text}"
+                </p>
+                <cite className="text-primary/70 text-lg font-medium" style={{ filter: 'blur(2px)' }}>
+                  — {verse.reference}
+                </cite>
+                <p className="text-primary/50 text-sm mt-4">
+                  Tap to reveal verse clearly
+                </p>
               </div>
-              <p className="text-lg text-primary/70">Tap to reveal verse</p>
             </div>
           ) : (
             <div className="text-center" onClick={handleToggleText}>

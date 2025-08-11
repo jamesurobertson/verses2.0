@@ -3,6 +3,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from '../_shared/cors.ts';
+import { v4 as uuidv4 } from 'uuid'
 
 // Types
 interface VerseOperationRequest {
@@ -48,16 +49,16 @@ function normalizeReferenceForLookup(reference: string): string {
 // Direct ESV API call - no intermediate edge function for better performance
 async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
   console.log('📖 Calling ESV API for reference:', reference);
-  
+
   const esvApiKey = Deno.env.get('ESV_API_KEY');
   const esvApiBaseUrl = Deno.env.get('ESV_API_BASE_URL') || 'https://api.esv.org/v3';
-  
+
   console.log('🔑 ESV API configuration:', {
     hasApiKey: !!esvApiKey,
     apiKeyLength: esvApiKey?.length || 0,
     baseUrl: esvApiBaseUrl
   });
-  
+
   if (!esvApiKey) {
     console.error('❌ ESV API key not configured');
     throw new Error('ESV API key not configured');
@@ -66,7 +67,7 @@ async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
   // Sanitize reference
   const sanitizedReference = reference.replace(/\s+/g, ' ').trim();
   console.log('🧹 Sanitized reference:', sanitizedReference);
-  
+
   if (!sanitizedReference || sanitizedReference.length > 200) {
     console.error('❌ Invalid reference format:', { sanitizedReference, length: sanitizedReference?.length });
     throw new Error('Invalid Bible reference format');
@@ -75,7 +76,7 @@ async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
   const params = new URLSearchParams({
     q: sanitizedReference,
     'include-headings': 'false',
-    'include-footnotes': 'false', 
+    'include-footnotes': 'false',
     'include-verse-numbers': 'false',
     'include-short-copyright': 'false',
     'include-passage-references': 'false'
@@ -122,7 +123,7 @@ async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
       canonical: data.canonical,
       firstPassageLength: data.passages?.[0]?.length || 0
     });
-    
+
     // Validate response structure
     if (!data || typeof data !== 'object') {
       console.error('❌ Invalid ESV API response structure:', data);
@@ -145,7 +146,7 @@ async function callESVAPI(reference: string): Promise<ESVPassageResponse> {
 async function verifyVerseWithESV(reference: string, text: string, translation: string = 'ESV'): Promise<boolean> {
   try {
     const esvResponse = await callESVAPI(reference);
-    
+
     if (!esvResponse.passages || esvResponse.passages.length === 0) {
       return false;
     }
@@ -171,13 +172,13 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
     userId: userId.slice(0, 8) + '...',
     hasUserToken: !!userToken
   });
-  
+
   const { operation, reference, normalizedRef, translation = 'ESV' } = request;
-  
+
   // Step 1: Always try lookup first (both operations need this)
   const normalizedInput = normalizedRef || normalizeReferenceForLookup(reference);
   console.log('🔍 Performing database lookup with normalized input:', normalizedInput);
-  
+
   const { data: lookupResult, error: lookupError } = await supabase
     .rpc('rpc_verse_lookup', {
       p_reference: reference,
@@ -204,11 +205,11 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
   if (lookupResult.verse) {
     // CRITICAL: Verify existing verse data against ESV API
     const isValid = await verifyVerseWithESV(
-      lookupResult.verse.reference, 
-      lookupResult.verse.text, 
+      lookupResult.verse.reference,
+      lookupResult.verse.text,
       lookupResult.verse.translation
     );
-    
+
     if (!isValid) {
       throw new Error(`Verse data integrity check failed for "${lookupResult.verse.reference}". This verse may have been corrupted.`);
     }
@@ -228,7 +229,7 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
       if (lookupResult.user_card && !lookupResult.user_card.archived) {
         throw new Error(`Verse "${lookupResult.verse.reference}" already exists in your collection`);
       }
-      
+
       // Return verse and existing card info - client will handle card creation/unarchiving
       return {
         verse: lookupResult.verse,
@@ -252,7 +253,7 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
   // If operation is create and verse not found, fetch and verify from ESV API
   if (operation === 'create') {
     const esvResponse = await callESVAPI(reference);
-    
+
     if (!esvResponse.passages || esvResponse.passages.length === 0) {
       throw new Error(`Invalid Bible reference: "${reference}". Please check the spelling and try again.`);
     }
@@ -316,15 +317,15 @@ async function handleVerseOperation(request: VerseOperationRequest, userId: stri
 }
 
 // Batch operations handler
-async function handleBatchOperations(operations: Array<{id: string, type: 'lookup' | 'create', data: any}>, userId: string, userToken: string) {
+async function handleBatchOperations(operations: Array<{ id: string, type: 'lookup' | 'create', data: any }>, userId: string, userToken: string) {
   const results = [];
-  
+
   console.log(`🚀 Processing batch with ${operations.length} operations for user ${userId}`);
-  
+
   for (const op of operations) {
     try {
       console.log(`📝 Processing operation ${op.id}: ${op.type}`);
-      
+
       // Convert batch operation to individual VerseOperationRequest
       const individualRequest: VerseOperationRequest = {
         operation: op.type,
@@ -332,35 +333,35 @@ async function handleBatchOperations(operations: Array<{id: string, type: 'looku
         normalizedRef: op.data.normalizedRef,
         translation: op.data.translation || 'ESV'
       };
-      
+
       // Process individual operation using existing handler
       const result = await handleVerseOperation(individualRequest, userId, userToken);
-      
-      results.push({ 
-        id: op.id, 
-        success: true, 
-        data: result 
+
+      results.push({
+        id: op.id,
+        success: true,
+        data: result
       });
-      
+
       console.log(`✅ Operation ${op.id} completed successfully`);
-      
+
     } catch (error) {
       console.error(`❌ Operation ${op.id} failed:`, error);
-      
-      results.push({ 
-        id: op.id, 
-        success: false, 
+
+      results.push({
+        id: op.id,
+        success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
-  
+
   // Calculate summary statistics
   const successful = results.filter(r => r.success).length;
   const failed = results.length - successful;
-  
+
   console.log(`📊 Batch completed: ${successful} successful, ${failed} failed`);
-  
+
   return {
     results,
     summary: {
@@ -380,8 +381,8 @@ serve(async (req) => {
 
   // Ensure only POST requests
   if (req.method !== 'POST') {
-    return new Response('Method Not Allowed', { 
-      status: 405, 
+    return new Response('Method Not Allowed', {
+      status: 405,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
@@ -389,9 +390,9 @@ serve(async (req) => {
   // SECURITY: Verify user authentication
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) {
-    return new Response(JSON.stringify({ 
-      error: 'Authorization header required' 
-    }), { 
+    return new Response(JSON.stringify({
+      error: 'Authorization header required'
+    }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
@@ -411,11 +412,11 @@ serve(async (req) => {
   // Verify the user token and get user info
   const token = authHeader.replace('Bearer ', '');
   const { data: { user }, error: authError } = await authenticatedSupabase.auth.getUser(token);
-  
+
   if (authError || !user) {
-    return new Response(JSON.stringify({ 
-      error: 'Invalid or expired token' 
-    }), { 
+    return new Response(JSON.stringify({
+      error: 'Invalid or expired token'
+    }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
@@ -426,9 +427,9 @@ serve(async (req) => {
 
     // Validate required fields
     if (!requestData.operation || !requestData.reference) {
-      return new Response(JSON.stringify({ 
-        error: 'Operation and reference are required' 
-      }), { 
+      return new Response(JSON.stringify({
+        error: 'Operation and reference are required'
+      }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -436,9 +437,9 @@ serve(async (req) => {
 
     // Validate operation type
     if (!['lookup', 'create', 'batch'].includes(requestData.operation)) {
-      return new Response(JSON.stringify({ 
-        error: 'Operation must be "lookup", "create", or "batch"' 
-      }), { 
+      return new Response(JSON.stringify({
+        error: 'Operation must be "lookup", "create", or "batch"'
+      }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -447,9 +448,9 @@ serve(async (req) => {
     // Handle batch operations separately
     if (requestData.operation === 'batch') {
       if (!requestData.operations || !Array.isArray(requestData.operations)) {
-        return new Response(JSON.stringify({ 
-          error: 'Batch operation requires operations array' 
-        }), { 
+        return new Response(JSON.stringify({
+          error: 'Batch operation requires operations array'
+        }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -462,7 +463,7 @@ serve(async (req) => {
       );
 
       return new Response(JSON.stringify({
-        batchId: requestData.batchId || crypto.randomUUID(),
+        batchId: requestData.batchId || uuidv4(),
         ...batchResult
       }), {
         status: 200,
@@ -485,10 +486,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Verse operation error:', error);
-    
-    return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'An unknown error occurred' 
-    }), { 
+
+    return new Response(JSON.stringify({
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

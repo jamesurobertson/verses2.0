@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from "../../../contexts/AuthContext";
 import { useTimezone } from '../../../contexts/TimezoneContext';
 import { localDb } from '../../../services/localDb';
@@ -273,7 +274,7 @@ export function useSlackReview(): UseSlackReviewReturn {
     if (!currentCard) return;
 
     const action: ReviewAction = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       cardId: currentCard.id,
       wasSuccessful: true,
       timestamp: Date.now(),
@@ -301,7 +302,7 @@ export function useSlackReview(): UseSlackReviewReturn {
     if (!currentCard) return;
 
     const action: ReviewAction = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       cardId: currentCard.id,
       wasSuccessful: false,
       timestamp: Date.now(),

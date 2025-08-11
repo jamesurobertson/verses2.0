@@ -197,7 +197,7 @@ export function parseBibleReference(reference: string): ParsedReference {
   }
   
   // Handle different punctuation styles first
-  let processedRef = cleaned
+  const processedRef = cleaned
     .replace(/\s*[.]\s*/g, ':')  // "John 3.16" -> "John 3:16"
     .replace(/\s+verse\s+/gi, ':')  // "John 3 verse 16" -> "John 3:16"
     .replace(/\s+chapter\s+/gi, ' ')  // "John chapter 3 verse 16" -> "John 3:16"

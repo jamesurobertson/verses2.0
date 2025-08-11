@@ -121,7 +121,7 @@ export const VerseReferenceInput: React.FC<VerseReferenceInputProps> = ({
 
       {/* Helper text */}
       {showManualEntry && (
-        <p className="mt-3 text-sm text-red-800">
+        <p className="mt-3 text-sm text-error">
           Connection issue detected. Please check your internet connection or enter the verse text manually.
         </p>
       )}

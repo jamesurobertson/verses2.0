@@ -14,8 +14,8 @@ export function sanitizeBibleReference(input: string): string {
   // Remove potentially harmful characters while preserving valid Bible reference characters
   const sanitized = input
     .trim()
-    .replace(/[<>\"'&]/g, '') // Remove HTML/XSS characters
-    .replace(/[^\w\s:;,\-.()\[\]]/g, '') // Only allow alphanumeric, spaces, and Bible reference punctuation
+    .replace(/[<>"'&]/g, '') // Remove HTML/XSS characters
+    .replace(/[^\w\s:;,\-.()[\]]/g, '') // Only allow alphanumeric, spaces, and Bible reference punctuation
     .substring(0, 200); // Limit length to prevent abuse
 
   if (sanitized.length === 0) {
@@ -59,7 +59,7 @@ export const bibleReferenceSchema = z
   .max(200, 'Bible reference too long')
   .transform(sanitizeBibleReference)
   .refine(
-    (ref) => /^[a-zA-Z0-9\s:;,\-.()\[\]]+$/.test(ref),
+    (ref) => /^[a-zA-Z0-9\s:;,\-.()[\]]+$/.test(ref),
     'Bible reference contains invalid characters'
   );
 
